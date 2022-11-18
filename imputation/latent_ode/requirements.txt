@@ -1,0 +1,6 @@
+pandas
+matplotlib
+torchdiffeq
+scikit-learn
+torchvision
+ipykernel

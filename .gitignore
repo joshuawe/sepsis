@@ -2,3 +2,9 @@ mimic_sepsis.csv.lnk
 .vscode/settings.json
 toy_dataset/datasetEnv/
 toy_dataset/synthetic_ts_1/
+imputation/mTAN/mTAN/
+imputation/latent_ode/latentOdeEnv/
+imputation/latent_ode/__pycache__/
+imputation/latent_ode/experiments/
+imputation/latent_ode/lib/__pycache__/
+imputation/latent_ode/logs/

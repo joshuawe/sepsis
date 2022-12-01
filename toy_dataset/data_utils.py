@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+import pycorruptor as pc
 
 class ToyDataset(Dataset):
     """Dataset class for toy / synthetical data to test before continuing with EHR data. It is meant for multivariate time series.
@@ -16,12 +17,22 @@ class ToyDataset(Dataset):
         Dataset: The base Pytorch Dataset class.
     """
 
-    def __init__(self, path):
+    def __init__(self, path, missingness=None, missingness_rate=0.3, missingness_value=-1):
         """Read in the data from *.csv file and prepare it. After init the class is left with self.x_data and self.x_ids.
 
         Args:
             path (str): Path to csv file.
+            missingness (str): The missingness pattern. Possible options are mcar and None. Defaults to None. If the pycorruptor module implements the mar and mnar cases, they can be added as well. 
+            missingness_rate (float): If `missigness!=0`, then this value decides the amount of missing data in percentage, should be [0,1].
+            missingness_value (float): The replacement value for all data points, where missingness should be induced.
         """
+        # set missingness function
+        if missingness == 'mcar':
+            self.missingness = pc.mcar
+        else:
+            self.missingness = None
+        self.missingness_rate = missingness_rate
+        self.missingness_value = missingness_value
         # Read in csv
         df = pd.read_csv(path, compression=None)
         # Sort wrt id, then sort wrt time, ascending
@@ -59,14 +70,24 @@ class ToyDataset(Dataset):
             # ... and create one big Tensor array
             x = np.array(x) # first converting to numpy is much faster
             x = torch.tensor(x)
-            # Create sample and return it
-            sample = x, x_ids
         else:
             x = X.loc[1]
             x = torch.tensor(x.values)
             # x = x[None, :, :]  # same as unsequeeze
-            sample = x, x_ids
+
+        # add the missingness if necessary
+        if self.missingness is not None:
+            # X_intact = Original input
+            # X = Original input with artificial missingness
+            # missing_mask = Mask indicating all missing values in X
+            # indicating_mask = Mask indicating all artificially missing values in X
+            X_intact, X, missing_mask, indicating_mask = self.missingness(x, 
+                                                                            self.missingness_rate, 
+                                                                            self.missingness_value)
+            Y = X_intact
             
+        
+        sample = X, x_ids, Y
         return sample
 
 
@@ -77,3 +98,5 @@ class ToyDataset(Dataset):
             int: Number of samples.
         """
         return self.n_samples
+
+    

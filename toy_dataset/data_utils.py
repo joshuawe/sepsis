@@ -28,13 +28,18 @@ class ToyDataset(Dataset):
         """
         # set missingness function
         if missingness == 'mcar':
-            self.missingness = pc.mcar
+            pass
         else:
-            self.missingness = None
+            self.missingness_rate = 0
+        
+    
+        self.missingness = pc.mcar
         self.missingness_rate = missingness_rate
         self.missingness_value = missingness_value
+        if self.missingness_rate in [0,1]: print(f"Attention, missingness_rate = {self.missingness_rate} !")
         # Read in csv
         df = pd.read_csv(path, compression=None)
+        self.input_dim = len(df.columns) - 1  # no 'id' column. What about 'time' column?
         # Sort wrt id, then sort wrt time, ascending
         df = df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)
         # Number of samples
@@ -50,6 +55,11 @@ class ToyDataset(Dataset):
 
     def __getitem__(self, index):
         """Returns items from dataset for given index. Due to the nested structure of pd.DataFrames and np.arrays, some overhead instructions are necessary.
+        
+        The returned X is of dimensions [B x T x N].  
+        + B = Batch size
+        + T = Num time points
+        + N = 2 * features + 1 (observed data (features) + mask of observed data (features) + observed time points (1D)). The observed time points contain the actual time corresponding to the datapoint.
 
         Args:
             index (): Index for data sample(s).
@@ -63,6 +73,7 @@ class ToyDataset(Dataset):
         x_ids = x_ids.tolist()
         # Extract, if multiple data, ...
         if isinstance(index, slice):
+            raise NotImplementedError('Did not implement the time extraction thing for slices in custom DataLoader.')
             x = list()
             for time_series in X[1]:
                 # ... convert to numpy and append to list ...
@@ -72,20 +83,24 @@ class ToyDataset(Dataset):
             x = torch.tensor(x)
         else:
             x = X.loc[1]
+            time = x['time']
+            x = x.drop('time')
             x = torch.tensor(x.values)
             # x = x[None, :, :]  # same as unsequeeze
 
-        # add the missingness if necessary
-        if self.missingness is not None:
-            # X_intact = Original input
-            # X = Original input with artificial missingness
-            # missing_mask = Mask indicating all missing values in X
-            # indicating_mask = Mask indicating all artificially missing values in X
-            X_intact, X, missing_mask, indicating_mask = self.missingness(x, 
-                                                                            self.missingness_rate, 
-                                                                            self.missingness_value)
-            Y = X_intact
-            
+        # add the missingness (even if no missingness required)
+        # X_intact = Original input
+        # X = Original input with artificial missingness
+        # missing_mask = Mask indicating all missing values in X
+        # indicating_mask = Mask indicating all artificially missing values in X
+        X_intact, X, missing_mask, indicating_mask = self.missingness(x, 
+                                                                        self.missingness_rate, 
+                                                                        self.missingness_value)
+        Y = X_intact
+
+        # concatenate all information into X
+        time.unsqueeze(1)
+        X_concat = torch.concatenate((X, indicating_mask, time), dim=1)
         
         sample = X, x_ids, Y
         return sample

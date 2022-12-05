@@ -39,7 +39,7 @@ class ToyDataset(Dataset):
         if self.missingness_rate in [0,1]: print(f"Attention, missingness_rate = {self.missingness_rate} !")
         # Read in csv
         df = pd.read_csv(path, compression=None)
-        self.input_dim = len(df.columns) - 1  # no 'id' column. What about 'time' column?
+        self.input_dim = len(df.columns) - 2  # no 'id' and 'time' column. What about 'time' column?
         # Sort wrt id, then sort wrt time, ascending
         df = df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)
         # Number of samples
@@ -84,7 +84,8 @@ class ToyDataset(Dataset):
         else:
             x = X.loc[1]
             time = x['time']
-            x = x.drop('time')
+            time = torch.tensor(x['time'].values)
+            x = x.drop(columns=['time'])
             x = torch.tensor(x.values)
             # x = x[None, :, :]  # same as unsequeeze
 
@@ -99,10 +100,18 @@ class ToyDataset(Dataset):
         Y = X_intact
 
         # concatenate all information into X
-        time.unsqueeze(1)
-        X_concat = torch.concatenate((X, indicating_mask, time), dim=1)
+        # time = time.unsqueeze(1)
+        # X_concat = torch.concatenate((X, indicating_mask, time), dim=1)
         
-        sample = X, x_ids, Y
+        # sample = X_concat, x_ids, Y
+        # X = torch.tensor(X.clone().detach(), dtype=torch.float32)
+        X = X.type(torch.float32)
+        missing_mask = missing_mask.type(torch.float32)
+        time = time.type(torch.float32)
+        Y = Y.type(torch.float32)
+        sample = X, missing_mask, time, Y
+        sample = torch.concatenate((X_intact, missing_mask, time.unsqueeze(1)), dim=1)
+        sample = sample.type(torch.float32)
         return sample
 
 

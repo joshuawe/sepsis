@@ -163,3 +163,42 @@ def get_Toydata_df(path):
     df = pd.read_csv(path, compression=None)
 
     return df
+
+
+class ToyDataDf():
+    def __init__(self, path) -> pd.DataFrame:
+        """Fetches the Toy Dataset from `path` and returns a `pandas.DataFrame`.
+
+        Args:
+            path (str): Path to dataset.
+
+        Returns:
+            pandas.DataFrame: The Dataset.
+        """
+        self.df = pd.read_csv(path, compression=None)
+        return self.df
+
+    def create_mcar_missingness(self, missingness_rate, missingness_value):
+        df = self.df
+        print(f'Created missing data without missingness in columns {df.columns[:2]}')
+        # create missingness in data
+        df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
+        # add the missingdata back into df
+        df.iloc[:,2:] = pd.DataFrame(df_mis, columns=df.columns[2:])
+        # Add the two discarded columns to the miss_mask and ind_mask
+        ones = np.ones((miss_mask.shape[0],2))
+        miss_mask = np.concatenate((ones, miss_mask), axis=1)
+        ind_mask = np.concatenate((ones, ind_mask), axis=1)
+        # save data to class
+        self.df_mis = df_mis
+        self.ind_mask = ind_mask
+        return
+
+        
+
+
+
+
+
+
+

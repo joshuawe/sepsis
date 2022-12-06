@@ -150,3 +150,16 @@ def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness
         DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle)
 
         return DataLoader
+
+def get_Toydata_df(path):
+    """Fetches the Toy Dataset from `path` and returns a `pandas.DataFrame`.
+
+    Args:
+        path (str): Path to dataset.
+
+    Returns:
+        pandas.DataFrame: The Dataset.
+    """
+    df = pd.read_csv(path, compression=None)
+
+    return df

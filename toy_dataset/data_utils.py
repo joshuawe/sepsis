@@ -4,8 +4,14 @@
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import pycorruptor as pc
+
+datasets_dict = {'toydataset_small': {
+                                'descr': 'A very small and simple dataset, that is used for initial testing, not even a proper toy data set, very small.',
+                                'path': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_1/synthetic_ts_test_data_eav.csv.gz'
+                                }
+}
 
 class ToyDataset(Dataset):
     """Dataset class for toy / synthetical data to test before continuing with EHR data. It is meant for multivariate time series.
@@ -124,3 +130,23 @@ class ToyDataset(Dataset):
         return self.n_samples
 
     
+def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness_value=-1, batch_size=1, shuffle=False):
+        """Wrapper function for the Toydataset in order to get the DataLoader directly.
+
+        Args:
+            path (str): Path to dataset.
+            missingness (str, optional): Check out ToyDataset class. Defaults to None.
+            missingness_rate (float, optional): Defaults to 0.3.
+            missingness_value (float, optional): Defaults to -1.
+            batch_size (int, optional):  Defaults to 1.
+            shuffle (bool, optional): Shuffle the samples in DataLoader. Defaults to False.
+
+        Returns:
+            torch.DataLoader: The Dataloader for the Toy Dataset.
+        """
+        # create dataset
+        dataset = ToyDataset(path, missingness=missingness, missingness_rate=missingness_rate, missingness_value=missingness_value)
+
+        DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle)
+
+        return DataLoader

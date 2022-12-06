@@ -176,13 +176,15 @@ class ToyDataDf():
             pandas.DataFrame: The Dataset.
         """
         self.df = pd.read_csv(path, compression=None)
-        return self.df
+        self.artificial_missingness = None
+        self.name = 'Toydataset'
+        return
 
-    def create_mcar_missingness(self, missingness_rate, missingness_value):
-        df = self.df
-        print(f'Created missing data without missingness in columns {df.columns[:2]}')
+    def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=True):
+        df = self.df.copy()
         # create missingness in data
         df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
+        num_values = miss_mask.size
         # add the missingdata back into df
         df.iloc[:,2:] = pd.DataFrame(df_mis, columns=df.columns[2:])
         # Add the two discarded columns to the miss_mask and ind_mask
@@ -190,9 +192,63 @@ class ToyDataDf():
         miss_mask = np.concatenate((ones, miss_mask), axis=1)
         ind_mask = np.concatenate((ones, ind_mask), axis=1)
         # save data to class
-        self.df_mis = df_mis
+        self.df_mis = df
         self.ind_mask = ind_mask
+        self.artificial_missingness = 'mcar'
+        if verbose:
+            print(f'--\nCreated MCAR missing data, but without missingness in columns {df.columns[:2]}')
+            print(f'missingness_rate: {missingness_rate},\tmissingness_value: {missingness_value}')
+            num_mis = df.isna().sum().sum()
+            print(f'Missing values: {num_mis} out of {num_values} ({num_mis/num_values:.1%}) (!excluding aforementioned columns)')
+            print(f'Data values in entire dataframe is {df.size} (shape: {df.shape})')
         return
+
+    def impute_mean(self):
+        return self._impute_mean_median('mean')
+
+    def impute_median(self):
+        return self._impute_mean_median('median')
+
+
+    def _impute_mean_median(self, imputation_func):
+        if self.artificial_missingness is None:
+            raise RuntimeError('First create missingness.')
+        df = self.df_mis.copy()
+        # get all time series IDs
+        IDs = df['id'].unique()
+        # Cycle through each time series ID
+        for id in IDs:
+            # get only the time series with corresponding ID
+            ts = df.loc[df['id'] == id]
+            # get the imputation value for each column
+            if imputation_func=='mean':
+                impu = ts.mean(axis=0, numeric_only=True)
+            elif imputation_func=='median':
+                impu = ts.median(axis=0, numeric_only=True)
+            else:
+                raise RuntimeError(f'Unexpected imputation method: {imputation_func}')
+            # replace nan values with mean
+            df.loc[df['id'] == id] = ts.fillna(impu)
+        return df
+
+    def mse(self, imputed_df:pd.DataFrame):
+        if self.artificial_missingness is None:
+            raise RuntimeError('First create missingness.')
+        # get rid of columns: id, time
+        X = self.df.iloc[:, 2:]
+        Y = imputed_df.iloc[:, 2:]
+        assert(X.shape == Y.shape)
+        # calculate mse
+        mse = (X - Y)**2
+        sum = mse.sum().sum()
+        # only consider values that had been missing before
+        #    Not necessary here, but good practice, as later on it will be necessary.
+        mse *= self.ind_mask[:, 2:]
+        mse =  mse.sum().sum()
+        mse /= self.ind_mask[:, 2:].sum().sum()
+
+        return mse
+
 
         
 

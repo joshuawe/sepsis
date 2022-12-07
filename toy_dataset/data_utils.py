@@ -204,13 +204,22 @@ class ToyDataDf():
         return
 
     def impute_mean(self):
-        return self._impute_mean_median('mean')
+        imputation_func = pd.DataFrame.mean
+        kwargs = {'axis':0, 'numeric_only':True}
+        return self._impute_mean_median(imputation_func, **kwargs)
 
     def impute_median(self):
-        return self._impute_mean_median('median')
+        imputation_func = pd.DataFrame.median
+        kwargs = {'axis':0, 'numeric_only':True}
+        return self._impute_mean_median(imputation_func, **kwargs)
 
+    def impute_LOCF(self):
+        pass
 
-    def _impute_mean_median(self, imputation_func):
+    def impute_NOCB(self):
+        pass
+
+    def _impute_mean_median(self, imputation_func, **kwargs):
         if self.artificial_missingness is None:
             raise RuntimeError('First create missingness.')
         df = self.df_mis.copy()
@@ -221,13 +230,8 @@ class ToyDataDf():
             # get only the time series with corresponding ID
             ts = df.loc[df['id'] == id]
             # get the imputation value for each column
-            if imputation_func=='mean':
-                impu = ts.mean(axis=0, numeric_only=True)
-            elif imputation_func=='median':
-                impu = ts.median(axis=0, numeric_only=True)
-            else:
-                raise RuntimeError(f'Unexpected imputation method: {imputation_func}')
-            # replace nan values with mean
+            impu = imputation_func(ts, **kwargs)
+            # replace nan values with imputed values
             df.loc[df['id'] == id] = ts.fillna(impu)
         return df
 

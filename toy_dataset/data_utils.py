@@ -181,7 +181,14 @@ class ToyDataDf():
         self.name = 'Toydataset'
         return
 
-    def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=True):
+    def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=False):
+        """Creates MCAR missingness on `self.df`. The first two columns are not included in the missingness process, as they are assumed to be 'id' and 'time'. The dataset with missingness and the corresponding mask are saved in `self.df_mis` and `self.ind_mask`. The shape of `self.df`, `self.df_mis` and `self.ind_mask` is the same.
+
+        Args:
+            missingness_rate (float): The amount of additionally missing data. Between 0.0 and 1.0 .
+            missingness_value (float, optional): The value the missing datapoints are to be assigned. Defaults to np.nan.
+            verbose (bool, optional): Print information to console. Defaults to False.
+        """
         df = self.df.copy()
         # create missingness in data
         df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
@@ -205,26 +212,58 @@ class ToyDataDf():
         return
 
     def impute_mean(self):
+        """Perform mean imputation on the dataset. Only works if missingness has been created already.
+
+        Returns:
+            pd.DataFrame: The dataset with mean imputation.
+        """
         imputation_func = pd.DataFrame.mean
         kwargs = {'axis':0, 'numeric_only':True}
         return self._base_impute(imputation_func, **kwargs)
 
     def impute_median(self):
+        """Perform median imputation on the dataset. Only works if missingness has been created already.
+
+        Returns:
+            pd.DataFrame: The dataset with median imputation.
+        """
         imputation_func = pd.DataFrame.median
         kwargs = {'axis':0, 'numeric_only':True}
         return self._base_impute(imputation_func, **kwargs)
 
     def impute_LOCF(self):
+        """Perform LOCF (last observation carried forward) imputation on the dataset. Only works if missingness has been created already.
+
+        Returns:
+            pd.DataFrame: The dataset with LOCF imputation.
+        """
         imputation_func = pd.DataFrame.fillna
         kwargs = {'method':'ffill'}
         return self._base_impute(imputation_func, **kwargs)
 
     def impute_NOCB(self):
+        """Perform NOCB (next observation carried backwards) imputation on the dataset. Only works if missingness has been created already.
+
+        Returns:
+            pd.DataFrame: The dataset with NOCB imputation.
+        """
         imputation_func = pd.DataFrame.fillna
         kwargs = {'method':'backfill'}
         return self._base_impute(imputation_func, **kwargs)
 
     def _base_impute(self, imputation_func, **kwargs):
+        """Base function for simple imputing methods. Groups the time series in the dataset by 'id' and the performs the corresponding imputation method that was passed as argument in `imputation_func`.
+
+        Args:
+            imputation_func (class function): The *pandas.DataFrame* function that performes desired imputation method.
+            kwargs: The kwargs that are passes as arguments to the `imputation_func`.
+
+        Raises:
+            RuntimeError: Only, if no missingness has been created already.
+
+        Returns:
+            pd.DataFrame: Dataframe with the imputed values.
+        """
         if self.artificial_missingness is None:
             raise RuntimeError('First create missingness.')
         df = self.df_mis.copy()
@@ -241,6 +280,17 @@ class ToyDataDf():
         return df
 
     def mse(self, imputed_df:pd.DataFrame):
+        """Calculates the MSE (mean squared error) between the imputed data in `imputed_df` and the original data in `self.df`.
+
+        Args:
+            imputed_df (pd.DataFrame): Dataset with imputed values.
+
+        Raises:
+            RuntimeError: Only, if no missingness has been created already.
+
+        Returns:
+            float: MSE
+        """
         if self.artificial_missingness is None:
             raise RuntimeError('First create missingness.')
         # get rid of columns: id, time
@@ -259,6 +309,18 @@ class ToyDataDf():
         return mse
 
     def get_mse_impute(self, name, error_dict, impute_func, missingness_rates, repeat_imputation=1):
+        """Calculates the (average) MSE for a given imputation method passes as the argument `impute_func`.
+
+        Args:
+            name (str): Name of imputation method.
+            error_dict (dict): A dict into which the new errors can be entered via `error_dict[name] = mse_imputation_method`.
+            impute_func (class function): The imputation function to be executed. It should come from the same instantiated `ToyDataDf` object.
+            missingness_rates (float): The amount of missingness to be created, between 0.0 and 1.0 .
+            repeat_imputation (int, optional): To average the MSE, perform multiple runs. The amount of runs (number of imputations) is determined by this argument. Defaults to 1.
+
+        Returns:
+            _type_: _description_
+        """
         error = list()
         # For each missingness_rate
         for m in tqdm(missingness_rates):

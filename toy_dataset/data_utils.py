@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pycorruptor as pc
+from tqdm import tqdm
 
 datasets_dict = {'toydataset_small': {
                                 'descr': 'A very small and simple dataset, that is used for initial testing, not even a proper toy data set, very small.',
@@ -206,20 +207,24 @@ class ToyDataDf():
     def impute_mean(self):
         imputation_func = pd.DataFrame.mean
         kwargs = {'axis':0, 'numeric_only':True}
-        return self._impute_mean_median(imputation_func, **kwargs)
+        return self._base_impute(imputation_func, **kwargs)
 
     def impute_median(self):
         imputation_func = pd.DataFrame.median
         kwargs = {'axis':0, 'numeric_only':True}
-        return self._impute_mean_median(imputation_func, **kwargs)
+        return self._base_impute(imputation_func, **kwargs)
 
     def impute_LOCF(self):
-        pass
+        imputation_func = pd.DataFrame.fillna
+        kwargs = {'method':'ffill'}
+        return self._base_impute(imputation_func, **kwargs)
 
     def impute_NOCB(self):
-        pass
+        imputation_func = pd.DataFrame.fillna
+        kwargs = {'method':'backfill'}
+        return self._base_impute(imputation_func, **kwargs)
 
-    def _impute_mean_median(self, imputation_func, **kwargs):
+    def _base_impute(self, imputation_func, **kwargs):
         if self.artificial_missingness is None:
             raise RuntimeError('First create missingness.')
         df = self.df_mis.copy()
@@ -252,6 +257,28 @@ class ToyDataDf():
         mse /= self.ind_mask[:, 2:].sum().sum()
 
         return mse
+
+    def get_mse_impute(self, name, error_dict, impute_func, missingness_rates, repeat_imputation=1):
+        error = list()
+        # For each missingness_rate
+        for m in tqdm(missingness_rates):
+            mse = 0
+            # Repeat, to average result
+            for r in range(1, repeat_imputation+1):
+                # create missingness
+                self.create_mcar_missingness(m, verbose=False)
+                # impute
+                imputed = impute_func()
+                # add to overall MSE 
+                mse += self.mse(imputed)
+            # average MSE
+            mse /= repeat_imputation
+            error.append(mse)
+        
+        error_dict[name] = error
+        return error_dict
+
+    
 
 
         

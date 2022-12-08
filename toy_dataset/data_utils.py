@@ -357,7 +357,7 @@ class ToyDataDf():
                 mse /= repeat_imputation
                 error.append(mse)
         # -> PyPOTS imputation methods <-
-        elif name in ['SAITS']:
+        elif name in ['SAITS', 'BRITS']:
             for m in tqdm(missingness_rates):
                 # switch off stdout (no printing to console)
                 out = sys.stdout
@@ -369,6 +369,8 @@ class ToyDataDf():
                 error.append(mse)
                 # turn on stdout again
                 sys.stdout = out
+        else:
+            raise RuntimeError(f'Imputation name unknown. Given name: {name}')
         
         error_dict[name] = error
         return error_dict
@@ -392,6 +394,18 @@ class ToyDataDf():
         # perform imputation
         imputed = model.impute(X)
         return imputed, X_intact, X, indicating_mask
+
+    def impute_BRITS(self, missingness_rate, missingess_value=np.nan, **kwargs):
+        train_func = self._train_BRITS
+        return self._impute_pypots(train_func, missingness_rate, missingess_value, **kwargs)
+
+    def _train_BRITS(self, X_intact, X, indicating_mask, log_path='./runs/brits/', **kwargs):
+        n_features = X.shape[-1]
+        brits = BRITS(n_steps=50, n_features=n_features, rnn_hidden_size=64, learning_rate=10e-3, epochs=20, patience=10)
+        title = self.name + '_BRITS'
+        brits.save_logs_to_tensorboard(saving_path=log_path, title='test')
+        brits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
+        return brits
 
 
     def impute_SAITS(self, missingness_rate, missingess_value=np.nan, **kwargs):
@@ -422,10 +436,6 @@ class ToyDataDf():
         saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
         return saits
-
-    def _impute_SAITS(self, X, saits:SAITS):
-        imputation = saits.impute(X)  # impute the originally-missing values and artificially-missing values
-        return imputation
 
 
 

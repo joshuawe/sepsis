@@ -177,9 +177,20 @@ class ToyDataDf():
             pandas.DataFrame: The Dataset.
         """
         self.df = pd.read_csv(path, compression=None)
+        self.df = self.df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)  # time was not sorted
         self.artificial_missingness = None
         self.name = 'Toydataset'
+        self.num_samples = len(self.df['id'].unique())
         return
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+    def __str__(self) -> str:
+        return self.name
+    
+    def __repr__(self) -> str:
+        return self.__str__()
 
     def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=False):
         """Creates MCAR missingness on `self.df`. The first two columns are not included in the missingness process, as they are assumed to be 'id' and 'time'. The dataset with missingness and the corresponding mask are saved in `self.df_mis` and `self.ind_mask`. The shape of `self.df`, `self.df_mis` and `self.ind_mask` is the same.
@@ -340,7 +351,21 @@ class ToyDataDf():
         error_dict[name] = error
         return error_dict
 
-    
+
+    def prepare_data_pypots(self, missingness_rate):
+        from sklearn.preprocessing import StandardScaler
+        from pypots.data import load_specific_dataset, mcar, masked_fill
+        from pypots.imputation import SAITS, BRITS
+        from pypots.utils.metrics import cal_mae
+
+        # get rid of 'id' and 'time' column
+        X = self.df.drop(['id', 'time'], axis = 1)
+        X = StandardScaler().fit_transform(X.to_numpy())
+        # X[:,0] = self.df['time'].to_numpy() # uncomment if time should not be normalized
+        X = X.reshape(self.num_samples, 50, -1)
+        # create missingness
+        X_intact, X, missing_mask, indicating_mask = mcar(X, missingness_rate) 
+        X = masked_fill(X, 1 - missing_mask, np.nan)   
 
 
         

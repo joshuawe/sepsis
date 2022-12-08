@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 import pycorruptor as pc
 from tqdm import tqdm
 
-from pypots.imputation import SAITS
+from pypots.imputation import SAITS, BRITS
 from sklearn.preprocessing import StandardScaler
 from pypots.data import mcar, masked_fill
 from pypots.utils.metrics import cal_mae, cal_mse
@@ -375,8 +375,6 @@ class ToyDataDf():
 
 
     def prepare_data_pypots(self, missingness_rate, missingess_value=np.nan):
-        
-
         # get rid of 'id' and 'time' column
         X = self.df.drop(['id', 'time'], axis = 1)
         X = StandardScaler().fit_transform(X.to_numpy())
@@ -387,18 +385,18 @@ class ToyDataDf():
         X = masked_fill(X, 1 - missing_mask, np.nan)
         return X_intact, X, indicating_mask  
 
+    def _impute_pypots(self, train_func, missingness_rate, missingess_value=np.nan, **kwargs):
+        X_intact, X, indicating_mask = self.prepare_data_pypots(missingness_rate, missingess_value)
+        # train the model
+        model = train_func( X_intact, X, indicating_mask, **kwargs)
+        # perform imputation
+        imputed = model.impute(X)
+        return imputed, X_intact, X, indicating_mask
+
+
     def impute_SAITS(self, missingness_rate, missingess_value=np.nan, **kwargs):
-            # get the data in the form the SAITS model needs it, including new missingness
-            X_intact, X, indicating_mask = self.prepare_data_pypots(missingness_rate, missingess_value)
-            # train the SAITS model
-            saits = self._train_SAITS(X_intact, X, indicating_mask, **kwargs)
-            # perform imputation
-            imputed = saits.impute(X)  # impute the originally-missing values and artificially-missing values
-            # # evaluate SAITS model
-            # mse = self._evaluate_SAITS(saits, X_intact, X, indicating_mask)
-            return imputed, X_intact, X, indicating_mask
-
-
+        train_func = self._train_SAITS
+        return self._impute_pypots(train_func, missingness_rate, missingess_value, **kwargs)
 
     def _train_SAITS(self, X_intact, X, indicating_mask, log_path='./runs/saits/', **kwargs):
         """Performs imputation with SAITS
@@ -419,7 +417,7 @@ class ToyDataDf():
         
         # Model training. This is PyPOTS showtime. 💪
         n_features = X.shape[-1]
-        saits = SAITS(n_steps=50, n_features=5, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.0, epochs=200, patience=30)
+        saits = SAITS(n_steps=50, n_features=5, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.0, epochs=50, patience=30)
         title = self.name + '_SAITS'
         saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.

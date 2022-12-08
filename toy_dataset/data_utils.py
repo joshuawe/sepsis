@@ -1,12 +1,19 @@
 """Utility functions for Toydataset / Synthetic dataset.
     Multivarite time series.
 """
+import os 
+import sys
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pycorruptor as pc
 from tqdm import tqdm
+
+from pypots.imputation import SAITS
+from sklearn.preprocessing import StandardScaler
+from pypots.data import mcar, masked_fill
+from pypots.utils.metrics import cal_mae, cal_mse
 
 datasets_dict = {'toydataset_small': {
                                 'descr': 'A very small and simple dataset, that is used for initial testing, not even a proper toy data set, very small.',
@@ -333,30 +340,42 @@ class ToyDataDf():
             _type_: _description_
         """
         error = list()
-        # For each missingness_rate
-        for m in tqdm(missingness_rates):
-            mse = 0
-            # Repeat, to average result
-            for r in range(1, repeat_imputation+1):
-                # create missingness
-                self.create_mcar_missingness(m, verbose=False)
-                # impute
-                imputed = impute_func()
-                # add to overall MSE 
-                mse += self.mse(imputed)
-            # average MSE
-            mse /= repeat_imputation
-            error.append(mse)
+        # -> Simple imputation methods <-
+        if name in ['mean', 'median', 'LOCF', 'NOCB']:
+            # For each missingness_rate
+            for m in tqdm(missingness_rates):
+                mse = 0
+                # Repeat, to average result
+                for r in range(1, repeat_imputation+1):
+                    # create missingness
+                    self.create_mcar_missingness(m, verbose=False)
+                    # impute
+                    imputed = impute_func()
+                    # add to overall MSE 
+                    mse += self.mse(imputed)
+                # average MSE
+                mse /= repeat_imputation
+                error.append(mse)
+        # -> PyPOTS imputation methods <-
+        elif name in ['SAITS']:
+            for m in tqdm(missingness_rates):
+                # switch off stdout (no printing to console)
+                out = sys.stdout
+                sys.stdout = open(os.devnull, 'w')
+                # get imputed values
+                imputed, X_intact, X, indicating_mask = impute_func(m)
+                # calculate mse
+                mse = cal_mse(imputed, X_intact, indicating_mask)
+                error.append(mse)
+                # turn on stdout again
+                sys.stdout = out
         
         error_dict[name] = error
         return error_dict
 
 
-    def prepare_data_pypots(self, missingness_rate):
-        from sklearn.preprocessing import StandardScaler
-        from pypots.data import load_specific_dataset, mcar, masked_fill
-        from pypots.imputation import SAITS, BRITS
-        from pypots.utils.metrics import cal_mae
+    def prepare_data_pypots(self, missingness_rate, missingess_value=np.nan):
+        
 
         # get rid of 'id' and 'time' column
         X = self.df.drop(['id', 'time'], axis = 1)
@@ -364,8 +383,52 @@ class ToyDataDf():
         # X[:,0] = self.df['time'].to_numpy() # uncomment if time should not be normalized
         X = X.reshape(self.num_samples, 50, -1)
         # create missingness
-        X_intact, X, missing_mask, indicating_mask = mcar(X, missingness_rate) 
-        X = masked_fill(X, 1 - missing_mask, np.nan)   
+        X_intact, X, missing_mask, indicating_mask = mcar(X, missingness_rate, missingess_value) 
+        X = masked_fill(X, 1 - missing_mask, np.nan)
+        return X_intact, X, indicating_mask  
+
+    def impute_SAITS(self, missingness_rate, missingess_value=np.nan, **kwargs):
+            # get the data in the form the SAITS model needs it, including new missingness
+            X_intact, X, indicating_mask = self.prepare_data_pypots(missingness_rate, missingess_value)
+            # train the SAITS model
+            saits = self._train_SAITS(X_intact, X, indicating_mask, **kwargs)
+            # perform imputation
+            imputed = saits.impute(X)  # impute the originally-missing values and artificially-missing values
+            # # evaluate SAITS model
+            # mse = self._evaluate_SAITS(saits, X_intact, X, indicating_mask)
+            return imputed, X_intact, X, indicating_mask
+
+
+
+    def _train_SAITS(self, X_intact, X, indicating_mask, log_path='./runs/saits/', **kwargs):
+        """Performs imputation with SAITS
+
+            kwargs:
+            + n_steps=50 : Time steps?
+            + n_features=5 : Num features in input X.
+            + n_layers=2 : 
+            + d_model=256 : 
+            + d_inner=128 : 
+            + n_head=4 : 
+            + d_k=64 : 
+            + d_v=64 : 
+            + dropout=0 :0, Dropout value, between 0.0 and 1.0.
+            + epochs=200 : Num epochs.
+            + patience=30 : Patience.
+        """
+        
+        # Model training. This is PyPOTS showtime. 💪
+        n_features = X.shape[-1]
+        saits = SAITS(n_steps=50, n_features=5, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.0, epochs=200, patience=30)
+        title = self.name + '_SAITS'
+        saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
+        saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
+        return saits
+
+    def _impute_SAITS(self, X, saits:SAITS):
+        imputation = saits.impute(X)  # impute the originally-missing values and artificially-missing values
+        return imputation
+
 
 
         

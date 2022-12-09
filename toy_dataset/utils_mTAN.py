@@ -10,13 +10,13 @@ from imputation.mTAN.src import models, utils
 
 
 class MTAN_ToyDataset():
-    def __init__(self, model_args, n_features, log_path, verbose=True) -> None:
+    def __init__(self, n_features, log_path, model_args=None, verbose=True) -> None:
         self.verbose = verbose
-        # create log_path
-        start_time = datetime.now().strftime("%Y.%m.%d-%H.%M.%S")
-        self.log_path = self.log_path + f'{self.args.dataset}/' + f'{start_time}/'
         # parse arguments
         self.parse_arguments(model_args=model_args)
+        # create log_path
+        start_time = datetime.now().strftime("%Y.%m.%d-%H.%M.%S")
+        self.log_path = log_path + f'{self.args.dataset}/' + f'{start_time}/'
         # NUmber of features / variables (also called dim by mTAN author)
         self.n_features = n_features
         # set up CUDA or device for torch
@@ -127,15 +127,19 @@ class MTAN_ToyDataset():
         print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 50))
         return
 
-    def train_model(self, train_loader, test_loader):
+    def train_model(self, train_loader, test_loader, train_extra_epochs=None):
         dim = self.n_features
+        if train_extra_epochs is not None:
+            final_epoch = self.epoch + train_extra_epochs
+        else:
+            final_epoch = self.args.niters
         # Run through epochs
-        for itr in range(self.epoch+1, self.args.niters + 1):
+        for itr in range(self.epoch+1, final_epoch+1):
             train_loss = 0
             train_n = 0
             avg_reconst, avg_kl, mse = 0, 0, 0
             if self.args.kl:
-                wait_until_kl_inc = int(args.niters * 0.4)
+                wait_until_kl_inc = int(self.args.niters * 0.4)
                 if itr < wait_until_kl_inc:
                     kl_coef = 0.
                 else:
@@ -170,7 +174,7 @@ class MTAN_ToyDataset():
                     subsampled_data, subsampled_tp, subsampled_mask = \
                         observed_data, observed_tp, observed_mask
                 # --- Forward pass through encoder --- 
-                out = rec(torch.cat((subsampled_data, subsampled_mask), 2), subsampled_tp)
+                out = self.encoder(torch.cat((subsampled_data, subsampled_mask), 2), subsampled_tp)
                 # Interpret the output as mean and log-variance of latent distribution
                 qz0_mean = out[:, :, :self.args.latent_dim]
                 qz0_logvar = out[:, :, self.args.latent_dim:]
@@ -185,7 +189,7 @@ class MTAN_ToyDataset():
                 # --- forward pass through decoder --- 
                 pred_x = self.decoder(
                     z0,
-                    observed_tp[None, :, :].repeat(args.k_iwae, 1, 1).view(-1, observed_tp.shape[1])
+                    observed_tp[None, :, :].repeat(self.args.k_iwae, 1, 1).view(-1, observed_tp.shape[1])
                 )
                 # nsample, batch, seqlen, dim
                 pred_x = pred_x.view(self.args.k_iwae, batch_len, pred_x.shape[1], pred_x.shape[2])
@@ -209,6 +213,7 @@ class MTAN_ToyDataset():
             self.writer.add_scalar('avg reconst', -avg_reconst / train_n, itr)
             self.writer.add_scalar('avg kl', avg_kl / train_n, itr)
             self.writer.add_scalar('avg mse', mse / train_n, itr)
+            self.epoch += 1
 
             if itr % 10 == 0:
                 mse = utils.evaluate(dim, self.encoder, self.decoder, test_loader, self.args, 1)

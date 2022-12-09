@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import pycorruptor as pc
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from pypots.imputation import SAITS, BRITS
 from sklearn.preprocessing import StandardScaler
@@ -111,6 +112,8 @@ class ToyDataset(Dataset):
         X_intact, X, missing_mask, indicating_mask = self.missingness(x, 
                                                                         self.missingness_rate, 
                                                                         self.missingness_value)
+        X_intact = X_intact * missing_mask
+
         Y = X_intact
 
         # concatenate all information into X
@@ -186,6 +189,7 @@ class ToyDataDf():
         self.df = pd.read_csv(path, compression=None)
         self.df = self.df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)  # time was not sorted
         self.artificial_missingness = None
+        self.artificial_missingness_rate = None
         self.name = 'Toydataset'
         self.num_samples = len(self.df['id'].unique())
         return
@@ -199,7 +203,7 @@ class ToyDataDf():
     def __repr__(self) -> str:
         return self.__str__()
 
-    def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=False):
+    def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=False) -> None:
         """Creates MCAR missingness on `self.df`. The first two columns are not included in the missingness process, as they are assumed to be 'id' and 'time'. The dataset with missingness and the corresponding mask are saved in `self.df_mis` and `self.ind_mask`. The shape of `self.df`, `self.df_mis` and `self.ind_mask` is the same.
 
         Args:
@@ -212,7 +216,7 @@ class ToyDataDf():
         df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
         num_values = miss_mask.size
         # add the missingdata back into df
-        df.iloc[:,2:] = pd.DataFrame(df_mis, columns=df.columns[2:])
+        df.iloc[:,2:] = pd.DataFrame(np.array(df_mis), columns=df.columns[2:])
         # Add the two discarded columns to the miss_mask and ind_mask
         ones = np.ones((miss_mask.shape[0],2))
         miss_mask = np.concatenate((ones, miss_mask), axis=1)
@@ -221,6 +225,7 @@ class ToyDataDf():
         self.df_mis = df
         self.ind_mask = ind_mask
         self.artificial_missingness = 'mcar'
+        self.artificial_missingness_rate = missingness_rate
         if verbose:
             print(f'--\nCreated MCAR missing data, but without missingness in columns {df.columns[:2]}')
             print(f'missingness_rate: {missingness_rate},\tmissingness_value: {missingness_value}')
@@ -229,51 +234,78 @@ class ToyDataDf():
             print(f'Data values in entire dataframe is {df.size} (shape: {df.shape})')
         return
 
-    def impute_mean(self):
+    def get_missingness_data(self):
+        """Receive the missingness generated for this dataset in the form of `X_intact, X, indicating_mask`. Beware of the datatypes.
+
+        Returns:
+            tuple(pd.Dataframe,pd.Dataframe,np.ndarray): X_intact, X, indicating_mask
+        """
+        X_intact = self.df
+        X = self.df_mis
+        indicating_mask = self.ind_mask
+        return X_intact, X, indicating_mask
+
+    def impute_mean(self, X:pd.DataFrame=None):
         """Perform mean imputation on the dataset. Only works if missingness has been created already.
+
+        Args:
+            X (pd.DataFrame, optional): Data containing missingness. Missing values should be NANs.
 
         Returns:
             pd.DataFrame: The dataset with mean imputation.
         """
-        imputation_func = pd.DataFrame.mean
-        kwargs = {'axis':0, 'numeric_only':True}
-        return self._base_impute(imputation_func, **kwargs)
+        imputation_func = pd.DataFrame.fillna
+        helper_func = pd.DataFrame.mean
+        kwargs = {'helper':{'axis':0, 'numeric_only':True}}
+        return self._base_impute(imputation_func, X, helper_func=helper_func, **kwargs)
 
-    def impute_median(self):
+    def impute_median(self, X:pd.DataFrame=None):
         """Perform median imputation on the dataset. Only works if missingness has been created already.
+
+        Args:
+            X (pd.DataFrame, optional): Data containing missingness. Missing values should be NANs.
 
         Returns:
             pd.DataFrame: The dataset with median imputation.
         """
-        imputation_func = pd.DataFrame.median
-        kwargs = {'axis':0, 'numeric_only':True}
-        return self._base_impute(imputation_func, **kwargs)
+        imputation_func = pd.DataFrame.fillna
+        helper_func = pd.DataFrame.median
+        kwargs = {'helper':{'axis':0, 'numeric_only':True}}
+        return self._base_impute(imputation_func, X, helper_func=helper_func, **kwargs)
 
-    def impute_LOCF(self):
+    def impute_LOCF(self, X:pd.DataFrame=None):
         """Perform LOCF (last observation carried forward) imputation on the dataset. Only works if missingness has been created already.
+
+        Args:
+            X (pd.DataFrame, optional): Data containing missingness. Missing values should be NANs.
 
         Returns:
             pd.DataFrame: The dataset with LOCF imputation.
         """
         imputation_func = pd.DataFrame.fillna
         kwargs = {'method':'ffill'}
-        return self._base_impute(imputation_func, **kwargs)
+        return self._base_impute(imputation_func, X, **kwargs)
 
-    def impute_NOCB(self):
+    def impute_NOCB(self, X:pd.DataFrame=None):
         """Perform NOCB (next observation carried backwards) imputation on the dataset. Only works if missingness has been created already.
+
+        Args:
+            X (pd.DataFrame, optional): Data containing missingness. Missing values should be NANs.
 
         Returns:
             pd.DataFrame: The dataset with NOCB imputation.
         """
         imputation_func = pd.DataFrame.fillna
         kwargs = {'method':'backfill'}
-        return self._base_impute(imputation_func, **kwargs)
+        return self._base_impute(imputation_func, X, **kwargs)
 
-    def _base_impute(self, imputation_func, **kwargs):
+    def _base_impute(self, imputation_func, X:pd.DataFrame=None, helper_func=None, **kwargs):
         """Base function for simple imputing methods. Groups the time series in the dataset by 'id' and the performs the corresponding imputation method that was passed as argument in `imputation_func`.
 
         Args:
             imputation_func (class function): The *pandas.DataFrame* function that performes desired imputation method.
+            X (pd.DataFrame, optional): External missing data, for imputation.
+            helper_func (class function): A helper function for the imputation to be executed.
             kwargs: The kwargs that are passes as arguments to the `imputation_func`.
 
         Raises:
@@ -284,18 +316,32 @@ class ToyDataDf():
         """
         if self.artificial_missingness is None:
             raise RuntimeError('First create missingness.')
-        df = self.df_mis.copy()
+        # Get helper_function arguments if they exist
+        kw = kwargs.pop('helper', None)
+        # Check if external data should be used for imputation
+        if X is None:
+            df = self.df_mis.copy() 
+        else:
+            df = X.copy()
         # get all time series IDs
         IDs = df['id'].unique()
         # Cycle through each time series ID
         for id in IDs:
             # get only the time series with corresponding ID
             ts = df.loc[df['id'] == id]
+            # execute helper function if necessary
+            if helper_func is not None:
+                value = helper_func(ts, **kw)
+            else:
+                value = None
             # get the imputation value for each column
-            impu = imputation_func(ts, **kwargs)
+            impu = imputation_func(ts, value=value, **kwargs)
             # replace nan values with imputed values
-            df.loc[df['id'] == id] = ts.fillna(impu)
+            df.loc[df['id'] == id] = impu # ts.fillna(impu)
         return df
+
+    def _base_impute_helper(self):
+        pass
 
     def mse(self, imputed_df:pd.DataFrame):
         """Calculates the MSE (mean squared error) between the imputed data in `imputed_df` and the original data in `self.df`.
@@ -379,7 +425,8 @@ class ToyDataDf():
     def prepare_data_pypots(self, missingness_rate, missingess_value=np.nan):
         # get rid of 'id' and 'time' column
         X = self.df.drop(['id', 'time'], axis = 1)
-        X = StandardScaler().fit_transform(X.to_numpy())
+        X = X.to_numpy()
+        # X = StandardScaler().fit_transform(X)
         # X[:,0] = self.df['time'].to_numpy() # uncomment if time should not be normalized
         X = X.reshape(self.num_samples, 50, -1)
         # create missingness
@@ -431,11 +478,15 @@ class ToyDataDf():
         
         # Model training. This is PyPOTS showtime. 💪
         n_features = X.shape[-1]
-        saits = SAITS(n_steps=50, n_features=5, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.0, epochs=50, patience=30)
+        saits = SAITS(n_steps=50, n_features=5, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=50, patience=30)
         title = self.name + '_SAITS'
         saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
         return saits
+
+    def plot_some_ts(self, X_intact, X_imputed ):
+        pass
+
 
 
 

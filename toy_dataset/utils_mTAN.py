@@ -5,18 +5,20 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 
-from random import SystemRandom
+# from random import SystemRandom
 from imputation.mTAN.src import models, utils
 
 
 class MTAN_ToyDataset():
     def __init__(self, model_args, n_features, log_path, verbose=True) -> None:
         self.verbose = verbose
-        self.log_path = log_path
+        # create log_path
+        start_time = datetime.now().strftime("%Y.%m.%d-%H.%M.%S")
+        self.log_path = self.log_path + f'{self.args.dataset}/' + f'{start_time}/'
         # parse arguments
         self.parse_arguments(model_args=model_args)
         # NUmber of features / variables (also called dim by mTAN author)
-        self.n_features =n_features
+        self.n_features = n_features
         # set up CUDA or device for torch
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         # set up model
@@ -25,7 +27,7 @@ class MTAN_ToyDataset():
         self.set_up_optimizer()
         self.epoch = 0
         # set up tensorboard logging
-        self.set_up_tensorboard()
+        self.set_up_tensorboard(self.log_path)
         # load pretrained model
         if self.args.fname is not None:
             self.load_from_checkpoint(self.args.fname)
@@ -105,12 +107,8 @@ class MTAN_ToyDataset():
             print('parameters encoder/decoder:', utils.count_parameters(self.encoder), utils.count_parameters(self.decoder))
         return
 
-    def set_up_tensorboard(self):
+    def set_up_tensorboard(self, path):
         # Set up Tensorboard
-        start_time = datetime.now().strftime("%Y.%m.%d-%H.%M.%S")
-        path = self.log_path
-        path += f'{self.args.dataset}/'
-        path += f'{start_time}/'
         self.writer = SummaryWriter(log_dir=path)
         return
 
@@ -128,6 +126,106 @@ class MTAN_ToyDataset():
         print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 30))
         print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 50))
         return
+
+    def train_model(self, train_loader, test_loader):
+        dim = self.n_features
+        # Run through epochs
+        for itr in range(self.epoch+1, self.args.niters + 1):
+            train_loss = 0
+            train_n = 0
+            avg_reconst, avg_kl, mse = 0, 0, 0
+            if self.args.kl:
+                wait_until_kl_inc = int(args.niters * 0.4)
+                if itr < wait_until_kl_inc:
+                    kl_coef = 0.
+                else:
+                    kl_coef = (1 - 0.99 ** (itr - wait_until_kl_inc))
+                self.writer.add_scalar('kl_coefficient', kl_coef, itr)
+            else:
+                kl_coef = 1
+
+            for train_batch in train_loader:
+                # get data
+                if self.args.dataset != 'XXtoy_josh':
+                    train_batch = train_batch.to(self.device)
+                    batch_len = train_batch.shape[0]
+                    observed_data = train_batch[:, :, :dim]
+                    observed_mask = train_batch[:, :, dim:2 * dim]
+                    observed_tp = train_batch[:, :, -1]
+                else:
+                    # send to proper device
+                    train_batch = list(train_batch)
+                    for i in range(len(train_batch)):
+                        train_batch[i] = train_batch[i].to(device)
+                    # give proper variable names
+                    observed_data, observed_mask, observed_tp, Y = train_batch
+                    batch_len = observed_data.shape[0]
+                    # concatenate because original implementation requires it
+                    train_batch = torch.concatenate(( observed_data, observed_mask, observed_tp.unsqueeze(2)), dim=2)
+
+                if self.args.sample_tp and self.args.sample_tp < 1:
+                    subsampled_data, subsampled_tp, subsampled_mask = utils.subsample_timepoints(
+                        observed_data.clone(), observed_tp.clone(), observed_mask.clone(), self.args.sample_tp)
+                else:
+                    subsampled_data, subsampled_tp, subsampled_mask = \
+                        observed_data, observed_tp, observed_mask
+                # --- Forward pass through encoder --- 
+                out = rec(torch.cat((subsampled_data, subsampled_mask), 2), subsampled_tp)
+                # Interpret the output as mean and log-variance of latent distribution
+                qz0_mean = out[:, :, :self.args.latent_dim]
+                qz0_logvar = out[:, :, self.args.latent_dim:]
+                # --- Sampling from latent distribution --- 
+                # draw args.kiwae times from the latent distribution
+                # epsilon = torch.randn(qz0_mean.size()).to(device)
+                epsilon = torch.randn(
+                    self.args.k_iwae, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]
+                ).to(self.device)
+                z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
+                z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
+                # --- forward pass through decoder --- 
+                pred_x = self.decoder(
+                    z0,
+                    observed_tp[None, :, :].repeat(args.k_iwae, 1, 1).view(-1, observed_tp.shape[1])
+                )
+                # nsample, batch, seqlen, dim
+                pred_x = pred_x.view(self.args.k_iwae, batch_len, pred_x.shape[1], pred_x.shape[2])
+                # --- compute loss --- 
+                logpx, analytic_kl = utils.compute_losses(
+                    dim, train_batch, qz0_mean, qz0_logvar, pred_x, self.args, self.device)
+                loss = -(torch.logsumexp(logpx - kl_coef * analytic_kl, dim=0).mean(0) - np.log(self.args.k_iwae))
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                train_loss += loss.item() * batch_len
+                train_n += batch_len
+                avg_reconst += torch.mean(logpx) * batch_len
+                avg_kl += torch.mean(analytic_kl) * batch_len
+                mse += utils.mean_squared_error(
+                    observed_data, pred_x.mean(0), observed_mask) * batch_len
+
+            print('Iter: {}, avg elbo: {:.4f}, avg reconst: {:.4f}, avg kl: {:.4f}, mse: {:.6f}'
+                .format(itr, train_loss / train_n, -avg_reconst / train_n, avg_kl / train_n, mse / train_n))
+            self.writer.add_scalar('avg elbo', train_loss / train_n, itr)
+            self.writer.add_scalar('avg reconst', -avg_reconst / train_n, itr)
+            self.writer.add_scalar('avg kl', avg_kl / train_n, itr)
+            self.writer.add_scalar('avg mse', mse / train_n, itr)
+
+            if itr % 10 == 0:
+                mse = utils.evaluate(dim, self.encoder, self.decoder, test_loader, self.args, 1)
+                self.writer.add_scalar('Test MSE', mse, itr)
+                print('Test Mean Squared Error', mse)
+            if itr % 10 == 0 and self.args.save:
+                path_save = self.log_path + self.args.dataset + '_' + self.args.enc + '_' + self.args.dec + '.h5'
+                torch.save({
+                    'args': self.args,
+                    'epoch': itr,
+                    'rec_state_dict': self.encoder.state_dict(),
+                    'dec_state_dict': self.decoder.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'loss': -1 * loss,
+                }, path_save)
+                print("Saved model state.")
+
 
 
     

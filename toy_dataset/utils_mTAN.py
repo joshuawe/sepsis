@@ -258,6 +258,53 @@ class MTAN_ToyDataset():
         log_dict = defaultdict(list)
         return log_dict
 
+    def impute(self, test_batch, k_samples):
+        """Impute the missingness away from a `test_batch`. The number of draws are `k_samples`.
+
+        Args:
+            test_batch (_type_): The testbatch to be imputed.
+            k_samples (int): Number of samples to be drawn from the latent distribution.
+
+        Returns:
+            _type_: The data with imputed values.
+        """
+        args = self.args
+        dim = self.n_features
+        with torch.no_grad():
+            test_batch = test_batch.to(self.device)
+            observed_data, observed_mask, observed_tp = (
+                test_batch[:, :, :dim],
+                test_batch[:, :, dim: 2 * dim],
+                test_batch[:, :, -1],
+            )
+            if args.sample_tp and args.sample_tp < 1:
+                subsampled_data, subsampled_tp, subsampled_mask = utils.subsample_timepoints(
+                    observed_data.clone(), observed_tp.clone(), observed_mask.clone(), args.sample_tp)
+            else:
+                subsampled_data, subsampled_tp, subsampled_mask = \
+                    observed_data, observed_tp, observed_mask
+            # forward pass to encoder
+            out = self.encoder(torch.cat((subsampled_data, subsampled_mask), 2), subsampled_tp)
+            qz0_mean, qz0_logvar = (
+                out[:, :, : args.latent_dim],
+                out[:, :, args.latent_dim:],
+            )
+            # drar num_sample from normal distr. with 
+            epsilon = torch.randn(
+                k_samples, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]
+            ).to(self.device)
+            z0 = epsilon * torch.exp(0.5 * qz0_logvar) + qz0_mean
+            z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
+            batch, seqlen = observed_tp.size()
+            time_steps = (
+                observed_tp[None, :, :].repeat(k_samples, 1, 1).view(-1, seqlen)
+            )
+            # forward pass to decoder
+            pred_x = self.decoder(z0, time_steps)
+
+        return pred_x
+
+
 
 
     

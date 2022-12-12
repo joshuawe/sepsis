@@ -190,7 +190,8 @@ class ToyDataDf():
         self.artificial_missingness = None
         self.artificial_missingness_rate = None
         self.name = 'Toydataset'
-        self.num_samples = len(self.df['id'].unique())
+        self.ids = self.df['id'].unique()
+        self.num_samples = len(self.ids)
         return
 
     def __len__(self) -> int:
@@ -201,6 +202,40 @@ class ToyDataDf():
     
     def __repr__(self) -> str:
         return self.__str__()
+
+    def get_sample(self, index:int):
+        """Get a single sample of dataset corresponding to the index.
+
+        Args:
+            index (int): Sample index.
+
+        Returns:
+            X_intact (np.array):  Ground truth. (time x features)
+            X (np.array): Data with artificially induced missingness. (time x features)
+            ind_mask (np.array): Indicating mask, =1 where missing data, =0 available data. (time x features)
+            time_pts (np.array): The time points for the data. (time x 1)
+        """
+        df = self.df
+        id = self.ids[index]
+        # X_intact and time_pts
+        X_intact = df.loc[df['id'] == id]
+        time_pts = X_intact.iloc[:,1].to_numpy(copy=True)
+        X_intact = X_intact.iloc[:,2:].to_numpy(copy=True)
+
+        # X (with artificial missingness)
+        X = self.df_mis[df['id'] == id]
+        X = X.iloc[:,2:].to_numpy(copy=True)
+
+        # ind_mask 
+        ind_mask = self.ind_mask[df['id']==id]
+        ind_mask = ind_mask[:,2:]
+
+        rows = 3
+        print(X_intact[:rows,:])
+        print(X[:rows,:])
+        print(ind_mask[:rows,:])
+        print(time_pts[:rows])
+        return X_intact, X, ind_mask, time_pts
 
     def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=False) -> None:
         """Creates MCAR missingness on `self.df`. The first two columns are not included in the missingness process, as they are assumed to be 'id' and 'time'. The dataset with missingness and the corresponding mask are saved in `self.df_mis` and `self.ind_mask`. The shape of `self.df`, `self.df_mis` and `self.ind_mask` is the same.
@@ -243,13 +278,10 @@ class ToyDataDf():
         Returns:
             tuple(pd.Dataframe, pd.Dataframe, np.ndarray): X_intact, X, indicating_mask
         """
-        if for_mtan:
-            pass
-        else:
-            X_intact = self.df
-            X = self.df_mis
-            indicating_mask = self.ind_mask
-            data = X_intact, X, indicating_mask
+        X_intact = self.df
+        X = self.df_mis
+        indicating_mask = self.ind_mask
+        data = X_intact, X, indicating_mask
         return data
 
     def impute_mean(self, X:pd.DataFrame=None):

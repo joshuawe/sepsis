@@ -4,6 +4,7 @@ import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
+from collections import defaultdict
 
 # from random import SystemRandom
 from imputation.mTAN.src import models, utils
@@ -237,7 +238,7 @@ class MTAN_ToyDataset():
         """Writes information for tensorboard as well as into a log dict, so the data can be easily used for analysis and plotting.
 
         Args:
-            tag (str): The description of the information. Must be part of the allowed keys.
+            tag (str): The description of the information.
             scalar_value (floar): The actual value to be stored.
             global_step (int): The epoch of training. 
         """
@@ -245,15 +246,16 @@ class MTAN_ToyDataset():
         self.log_dict[tag].append((global_step, scalar_value))
 
     def _prepare_log_dict(self):
-        """Prepares as log dict with all required keys, so that training information can be added and stored. New information should be added by using the `self.log_scalar()` function. The entries are then `{key1:[(val1,epoch1), (val2, epoch2), ...], key2:[...], ...}`.
+        """Prepares as log dict with all required keys, so that training information can be added and stored. New information should be added by using the `self.log_scalar()` function. The entries are then `{key1:[(val1,epoch1), (val2, epoch2), ...], key2:[...], ...}`. As the log dict is of the class `defaultdict(list)`, values can be appended to the list of a key, even if the key does not exist yet.
 
         Returns:
             dict: The log dict with empty entries.
         """
-        log_dict = dict()
-        keys = ['avg elbo', 'avg reconst', 'avg kl', 'avg mse', 'kl_coefficient', 'Test MSE']
-        for key in keys:
-            log_dict[key] = list()
+        # log_dict = dict()
+        # keys = ['avg elbo', 'avg reconst', 'avg kl', 'avg mse', 'kl_coefficient', 'Test MSE']
+        # for key in keys:
+        #     log_dict[key] = list()
+        log_dict = defaultdict(list)
         return log_dict
 
 

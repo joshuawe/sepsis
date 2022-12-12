@@ -7,7 +7,8 @@ from datetime import datetime
 from collections import defaultdict
 
 # from random import SystemRandom
-from imputation.mTAN.src import models, utils
+# from imputation.mTAN.src import models, utils
+from imputation.models.mTAN import models, utils
 
 
 class MTAN_ToyDataset():
@@ -80,7 +81,7 @@ class MTAN_ToyDataset():
 
     def set_up_model(self, args=None):
         if args is not None:
-            self.pass_arguments(args)
+            self.parse_arguments(args)
         args = self.args
         self.encoder = models.enc_mtan_rnn(
                             self.n_features, 
@@ -257,6 +258,37 @@ class MTAN_ToyDataset():
         #     log_dict[key] = list()
         log_dict = defaultdict(list)
         return log_dict
+
+    def combine_sample(self, X, ind_mask, time_pts):
+        """Take the individual matrices and combine / concatenate them to one tensor.
+
+        Args:
+            X (array): Data with missingness.
+            ind_mask (array): Indicating mask for missingness.
+            time_pts (array): All time points.
+        """
+        observed_data = torch.tensor(X)
+        observed_mask = torch.tensor(ind_mask)
+        observed_tp = torch.tensor(time_pts)
+        torch.concatenate((observed_data, observed_mask, observed_tp.unsqueeze(1)), dim=1)
+        pass
+
+    def split_sample(self, batch:torch.Tensor):
+        """Takes a batch that is a combined matrix and splits it up into its subcomponents `observed_data`, `observed_mask`, `observed_tp`.
+
+        Args:
+            batch (torch.Tensor): The combined tensor, which should be a batch.
+
+        Returns:
+            _type_: _description_
+        """
+        if len(batch.shape) != 3:
+            raise RuntimeError(f'The given batch is not a batch. Expected a 3 dimensional tensor, instead got shape: {batch.shape}')
+        dim = self.n_features
+        observed_data = batch[:, :, :dim]
+        observed_mask = batch[:, :, dim: 2 * dim]
+        observed_tp = batch[:, :, -1]
+        return observed_data, observed_mask, observed_tp
 
     def impute(self, test_batch, k_samples):
         """Impute the missingness away from a `test_batch`. The number of draws are `k_samples`.

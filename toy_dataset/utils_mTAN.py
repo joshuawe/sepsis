@@ -31,6 +31,8 @@ class MTAN_ToyDataset():
         # load pretrained model
         if self.args.fname is not None:
             self.load_from_checkpoint(self.args.fname)
+        # set up the log dict
+        self.log_dict = self._prepare_log_dict()
 
         return
 
@@ -144,7 +146,7 @@ class MTAN_ToyDataset():
                     kl_coef = 0.
                 else:
                     kl_coef = (1 - 0.99 ** (itr - wait_until_kl_inc))
-                self.writer.add_scalar('kl_coefficient', kl_coef, itr)
+                self.log_scalar('kl_coefficient', kl_coef, itr)
             else:
                 kl_coef = 1
 
@@ -209,15 +211,15 @@ class MTAN_ToyDataset():
 
             print('Iter: {}, avg elbo: {:.4f}, avg reconst: {:.4f}, avg kl: {:.4f}, mse: {:.6f}'
                 .format(itr, train_loss / train_n, -avg_reconst / train_n, avg_kl / train_n, mse / train_n))
-            self.writer.add_scalar('avg elbo', train_loss / train_n, itr)
-            self.writer.add_scalar('avg reconst', -avg_reconst / train_n, itr)
-            self.writer.add_scalar('avg kl', avg_kl / train_n, itr)
-            self.writer.add_scalar('avg mse', mse / train_n, itr)
+            self.log_scalar('avg elbo', train_loss / train_n, itr)
+            self.log_scalar('avg reconst', -avg_reconst / train_n, itr)
+            self.log_scalar('avg kl', avg_kl / train_n, itr)
+            self.log_scalar('avg mse', mse / train_n, itr)
             self.epoch += 1
 
             if itr % 10 == 0:
                 mse = utils.evaluate(dim, self.encoder, self.decoder, test_loader, self.args, 1)
-                self.writer.add_scalar('Test MSE', mse, itr)
+                self.log_scalar('Test MSE', mse, itr)
                 print('Test Mean Squared Error', mse)
             if itr % 10 == 0 and self.args.save:
                 path_save = self.log_path + self.args.dataset + '_' + self.args.enc + '_' + self.args.dec + '.h5'
@@ -230,6 +232,29 @@ class MTAN_ToyDataset():
                     'loss': -1 * loss,
                 }, path_save)
                 print("Saved model state.")
+
+    def log_scalar(self, tag, scalar_value, global_step):
+        """Writes information for tensorboard as well as into a log dict, so the data can be easily used for analysis and plotting.
+
+        Args:
+            tag (str): The description of the information. Must be part of the allowed keys.
+            scalar_value (floar): The actual value to be stored.
+            global_step (int): The epoch of training. 
+        """
+        self.writer.add_scalar(tag, scalar_value, global_step)
+        self.log_dict[tag].append((global_step, scalar_value))
+
+    def _prepare_log_dict(self):
+        """Prepares as log dict with all required keys, so that training information can be added and stored. New information should be added by using the `self.log_scalar()` function. The entries are then `{key1:[(val1,epoch1), (val2, epoch2), ...], key2:[...], ...}`.
+
+        Returns:
+            dict: The log dict with empty entries.
+        """
+        log_dict = dict()
+        keys = ['avg elbo', 'avg reconst', 'avg kl', 'avg mse', 'kl_coefficient', 'Test MSE']
+        for key in keys:
+            log_dict[key] = list()
+        return log_dict
 
 
 

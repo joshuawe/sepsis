@@ -32,7 +32,7 @@ class ToyDataset(Dataset):
         Dataset: The base Pytorch Dataset class.
     """
 
-    def __init__(self, path, missingness=None, missingness_rate=0.3, missingness_value=-1):
+    def __init__(self, path, missingness='mcar', missingness_rate=0.3, missingness_value=-1):
         """Read in the data from *.csv file and prepare it. After init the class is left with self.x_data and self.x_ids.
 
         Args:
@@ -141,7 +141,7 @@ class ToyDataset(Dataset):
         return self.n_samples
 
     
-def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness_value=-1, batch_size=1, shuffle=False):
+def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness_value=-1, batch_size=1, shuffle=False) -> DataLoader:
         """Wrapper function for the Toydataset in order to get the DataLoader directly.
 
         Args:
@@ -158,9 +158,9 @@ def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness
         # create dataset
         dataset = ToyDataset(path, missingness=missingness, missingness_rate=missingness_rate, missingness_value=missingness_value)
 
-        DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle)
+        dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle)
 
-        return DataLoader
+        return dataloader
 
 def get_Toydata_df(path):
     """Fetches the Toy Dataset from `path` and returns a `pandas.DataFrame`.
@@ -177,17 +177,16 @@ def get_Toydata_df(path):
 
 
 class ToyDataDf():
-    def __init__(self, path) -> pd.DataFrame:
+    def __init__(self, path):
         """Fetches the Toy Dataset from `path` and returns a `pandas.DataFrame`.
 
         Args:
-            path (str): Path to dataset.
-
-        Returns:
-            pandas.DataFrame: The Dataset.
+            path (str): Path to dataset..
         """
+        self.path = path
         self.df = pd.read_csv(path, compression=None)
         self.df = self.df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)  # time was not sorted
+        self.n_features  = len(self.df.columns) - 2 
         self.artificial_missingness = None
         self.artificial_missingness_rate = None
         self.name = 'Toydataset'
@@ -484,7 +483,26 @@ class ToyDataDf():
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
         return saits
 
-    def plot_some_ts(self, X_intact, X_imputed ):
+    def prepare_data_mTAN(self):
+        train_dataloader = get_Toy_Dataloader(self.path)
+        return train_dataloader
+
+    def _train_mTAN(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):
+        from toy_dataset.utils_mTAN import MTAN_ToyDataset
+        # instantiate model
+        n_features = self.n_features
+        mTAN = MTAN_ToyDataset(n_features, log_path, model_args=None, verbose=True)
+        # save logs to tensorboard is done automatically
+        # fit
+        mTAN.train_model(train_dataloader, test_dataloader, 10)
+        return mTAN
+
+    def impute_mTAN(self):
+        # prepare data
+
+        # train model
+
+        # impute
         pass
 
 

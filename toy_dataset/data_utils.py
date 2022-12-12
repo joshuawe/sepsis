@@ -225,6 +225,7 @@ class ToyDataDf():
         self.ind_mask = ind_mask
         self.artificial_missingness = 'mcar'
         self.artificial_missingness_rate = missingness_rate
+        self.artificial_missingness_value = missingness_value
         if verbose:
             print(f'--\nCreated MCAR missing data, but without missingness in columns {df.columns[:2]}')
             print(f'missingness_rate: {missingness_rate},\tmissingness_value: {missingness_value}')
@@ -233,16 +234,23 @@ class ToyDataDf():
             print(f'Data values in entire dataframe is {df.size} (shape: {df.shape})')
         return
 
-    def get_missingness_data(self):
-        """Receive the missingness generated for this dataset in the form of `X_intact, X, indicating_mask`. Beware of the datatypes.
+    def get_missingness_data(self, for_mtan=False):
+        """Receive the missingness generated for this dataset in the form of `X_intact, X, indicating_mask`. Beware of the datatypes. No exluded columns or so (= including id and time).
+
+        Args:
+            for_mtan (bool): Flag. Should data be provided for mtan format
 
         Returns:
-            tuple(pd.Dataframe,pd.Dataframe,np.ndarray): X_intact, X, indicating_mask
+            tuple(pd.Dataframe, pd.Dataframe, np.ndarray): X_intact, X, indicating_mask
         """
-        X_intact = self.df
-        X = self.df_mis
-        indicating_mask = self.ind_mask
-        return X_intact, X, indicating_mask
+        if for_mtan:
+            pass
+        else:
+            X_intact = self.df
+            X = self.df_mis
+            indicating_mask = self.ind_mask
+            data = X_intact, X, indicating_mask
+        return data
 
     def impute_mean(self, X:pd.DataFrame=None):
         """Perform mean imputation on the dataset. Only works if missingness has been created already.
@@ -483,11 +491,30 @@ class ToyDataDf():
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
         return saits
 
-    def prepare_data_mTAN(self):
-        train_dataloader = get_Toy_Dataloader(self.path)
-        return train_dataloader
+    def prepare_mtan(self, log_path='./runs/mTAN', model_args=None, verbose=True, *args, **kwargs) -> None:
+        from toy_dataset.utils_mTAN import MTAN_ToyDataset
+        # prepare dataloaders for mTAN
+        train_dataloader, test_dataloader = self.prepare_data_mtan()
 
-    def _train_mTAN(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):
+        # instantiate the mTAN model
+        n_features = self.n_features
+        mtan = MTAN_ToyDataset(n_features, log_path, model_args=model_args, verbose=verbose)
+
+        # train/fit the mTAN model
+        mtan.train_model(train_dataloader, test_dataloader, train_extra_epochs=10)
+        self.mtan = mtan
+
+        return
+
+    def prepare_data_mtan(self) -> 'tuple[DataLoader, DataLoader]':        
+        missingness_rate = self.artificial_missingness_rate
+        missingness_value = self.artificial_missingness_value
+        train_dataloader = get_Toy_Dataloader(self.path, None, missingness_rate, missingness_value)
+        test_dataloader = train_dataloader
+        print('Warning, train_dataloader and test_dataloader are the same!')
+        return train_dataloader, test_dataloader
+
+    def _train_mtan(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):
         from toy_dataset.utils_mTAN import MTAN_ToyDataset
         # instantiate model
         n_features = self.n_features
@@ -497,7 +524,9 @@ class ToyDataDf():
         mTAN.train_model(train_dataloader, test_dataloader, 10)
         return mTAN
 
-    def impute_mTAN(self):
+    def impute_mtan(self):
+        if not hasattr(self, 'mtan'):
+            raise RuntimeError('The object does not have .mtan as an attribute.')
         # prepare data
 
         # train model

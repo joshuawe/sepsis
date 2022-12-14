@@ -19,6 +19,12 @@ from pypots.utils.metrics import cal_mae, cal_mse
 datasets_dict = {'toydataset_small': {
                                 'descr': 'A very small and simple dataset, that is used for initial testing, not even a proper toy data set, very small.',
                                 'path': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_1/synthetic_ts_test_data_eav.csv.gz'
+                                },
+                'toydataset_50000': {
+                                'descr': 'A simple synthetical time series data set with 50000 data samples. Columns include id, time, noise, trend, seasonal, trend+season.'
+                                'path_train': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_train_40000.csv.gz',
+                                'path_validation': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_validation_5000.csv.gz'
+                                'path_test': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_test_5000.csv.gz'
                                 }
 }
 
@@ -221,21 +227,13 @@ class ToyDataDf():
         X_intact = df.loc[df['id'] == id]
         time_pts = X_intact.iloc[:,1].to_numpy(copy=True)
         X_intact = X_intact.iloc[:,2:].to_numpy(copy=True)
-
         # X (with artificial missingness)
         X = self.df_mis[df['id'] == id]
         X = X.iloc[:,2:].to_numpy(copy=True)
-
         # ind_mask 
         ind_mask = self.ind_mask[df['id']==id]
         ind_mask = ind_mask[:,2:]
-
-        rows = 3
-        print(X_intact[:rows,:])
-        print(X[:rows,:])
-        print(ind_mask[:rows,:])
-        print(time_pts[:rows])
-        return X_intact, X, ind_mask, time_pts
+        return X_intact, X, ind_mask, time_pts, id
 
     def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=False) -> None:
         """Creates MCAR missingness on `self.df`. The first two columns are not included in the missingness process, as they are assumed to be 'id' and 'time'. The dataset with missingness and the corresponding mask are saved in `self.df_mis` and `self.ind_mask`. The shape of `self.df`, `self.df_mis` and `self.ind_mask` is the same.
@@ -533,7 +531,7 @@ class ToyDataDf():
         mtan = MTAN_ToyDataset(n_features, log_path, model_args=model_args, verbose=verbose)
 
         # train/fit the mTAN model
-        mtan.train_model(train_dataloader, test_dataloader, train_extra_epochs=10)
+        mtan.train_model(train_dataloader, test_dataloader, train_extra_epochs=1000)
         self.mtan = mtan
 
         return
@@ -546,25 +544,21 @@ class ToyDataDf():
         print('Warning, train_dataloader and test_dataloader are the same!')
         return train_dataloader, test_dataloader
 
-    def _train_mtan(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):
-        from toy_dataset.utils_mTAN import MTAN_ToyDataset
-        # instantiate model
-        n_features = self.n_features
-        mTAN = MTAN_ToyDataset(n_features, log_path, model_args=None, verbose=True)
-        # save logs to tensorboard is done automatically
-        # fit
-        mTAN.train_model(train_dataloader, test_dataloader, 10)
-        return mTAN
+    # def _train_mtan(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):
+    #     from toy_dataset.utils_mTAN import MTAN_ToyDataset
+    #     # instantiate model
+    #     n_features = self.n_features
+    #     mTAN = MTAN_ToyDataset(n_features, log_path, model_args=None, verbose=True)
+    #     # save logs to tensorboard is done automatically
+    #     # fit
+    #     mTAN.train_model(train_dataloader, test_dataloader, 10)
+    #     return mTAN
 
-    def impute_mtan(self):
+    def impute_mtan(self, X_intact:np.ndarray, X:np.ndarray, ind_mask:np.ndarray, time_pts:np.ndarray):
         if not hasattr(self, 'mtan'):
-            raise RuntimeError('The object does not have .mtan as an attribute.')
-        # prepare data
+            raise RuntimeError(r'The object does not have .mtan as an attribute. Please first run `self.prepare_mtan(_)`')
 
-        # train model
-
-        # impute
-        pass
+        self.mtan.impute()
 
 
 

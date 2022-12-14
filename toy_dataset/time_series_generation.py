@@ -42,7 +42,7 @@ def generate_ts_sample(series_length=100):
     # trend + seasonality
     m = np.random.uniform(0.1,3)   # slope
     n = np.random.rand() * 100  # y-axis at x=0
-    mu = 1
+    mu = 0.8
     sigma = 0.1
     trend_season = m * trend + n + seasonality  + np.random.normal(mu, sigma, series_length) * noise
 

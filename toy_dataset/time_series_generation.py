@@ -84,3 +84,36 @@ def genereate_ts_dataset(samples, series_length, save_path=None):
         print(f'Saving dataset under {save_path}\nMake sure to have a *.csv.gz file ending.')
         df.to_csv(save_path, sep=",", compression=None, index=False)
     return df
+
+
+def visualize_new_sample():
+    """Visualizes a new time series sample that is created by calling the function. So, calling the function a few time will give some examples of what the time series could look like.
+    """
+    import matplotlib.pyplot as plt
+    time, noise, trend, seasonality, trend_season = generate_ts_sample()
+    time = np.arange(len(time))
+
+    fig = plt.figure()
+    fig.add_subplot(221)
+    plt.plot(time, noise)
+    plt.title('Noise')
+    plt.xlabel('time t')
+    plt.ylabel('y')
+    fig.add_subplot(222)
+    plt.title('Trend')
+    plt.xlabel('time t')
+    plt.ylabel('y')
+    plt.plot(time, trend)
+    fig.add_subplot(223)
+    plt.xlabel('time t')
+    plt.ylabel('y')
+    plt.title('Seasonality')
+    plt.plot(time, seasonality)
+    fig.add_subplot(224)
+    plt.title('Trend + Seasonality')
+    plt.xlabel('time t')
+    plt.ylabel('y')
+    plt.plot(time, trend_season)
+    plt.tight_layout()
+    plt.show()
+    # print('Note, that in the proper dataset the time always starts at 0, basically a shift of the x-axis.')

@@ -40,7 +40,7 @@ class MTAN_ToyDataset():
 
     def parse_arguments(self, model_args=None):
         if model_args is None:
-            model_args = ['--niters', '5000', '--lr', '0.0001', '--batch-size', '2', '--rec-hidden', '32', '--latent-dim', '4', '--length', '20', '--enc', 'mtan_rnn', '--dec', 'mtan_rnn', '--n', '1000',  '--gen-hidden', '50', '--save', '1', '--k-iwae', '5', '--std', '0.01', '--norm', '--learn-emb', '--kl', '--seed', '0', '--num-ref-points', '20', '--dataset', 'toy_josh']
+            model_args = ['--niters', '2000', '--lr', '0.0001', '--batch-size', '2', '--rec-hidden', '32', '--latent-dim', '4', '--length', '20', '--enc', 'mtan_rnn', '--dec', 'mtan_rnn', '--n', '1000',  '--gen-hidden', '50', '--save', '1', '--k-iwae', '5', '--std', '0.01', '--norm', '--learn-emb', '--kl', '--seed', '0', '--num-ref-points', '20', '--dataset', 'toy_josh']
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--niters', type=int, default=2000, help='Number of epochs')
@@ -143,7 +143,7 @@ class MTAN_ToyDataset():
             train_n = 0
             avg_reconst, avg_kl, mse = 0, 0, 0
             if self.args.kl:
-                wait_until_kl_inc = int(self.args.niters * 0.4)
+                wait_until_kl_inc = int(self.args.niters * 0.1)
                 if itr < wait_until_kl_inc:
                     kl_coef = 0.
                 else:
@@ -260,7 +260,7 @@ class MTAN_ToyDataset():
         return log_dict
 
     def combine_sample(self, X, ind_mask, time_pts):
-        """Take the individual matrices and combine / concatenate them to one tensor.
+        """Take the individual matrices and combine / concatenate them to one tensor. All NAN values are converted to zero, because mTAN needs it this way.
 
         Args:
             X (array): Data with missingness.
@@ -270,8 +270,9 @@ class MTAN_ToyDataset():
         observed_data = torch.tensor(X)
         observed_mask = torch.tensor(ind_mask)
         observed_tp = torch.tensor(time_pts)
-        torch.concatenate((observed_data, observed_mask, observed_tp.unsqueeze(1)), dim=1)
-        pass
+        batch_sample = torch.concatenate((observed_data, observed_mask, observed_tp.unsqueeze(1)), dim=1)
+        batch_sample = batch_sample.nan_to_num() # Replace all NAN values with zero.
+        return batch_sample.type(torch.float32)
 
     def split_sample(self, batch:torch.Tensor):
         """Takes a batch that is a combined matrix and splits it up into its subcomponents `observed_data`, `observed_mask`, `observed_tp`.
@@ -280,7 +281,7 @@ class MTAN_ToyDataset():
             batch (torch.Tensor): The combined tensor, which should be a batch.
 
         Returns:
-            _type_: _description_
+            _type_: observed_data, observed_mask, observed_tp
         """
         if len(batch.shape) != 3:
             raise RuntimeError(f'The given batch is not a batch. Expected a 3 dimensional tensor, instead got shape: {batch.shape}')
@@ -290,7 +291,7 @@ class MTAN_ToyDataset():
         observed_tp = batch[:, :, -1]
         return observed_data, observed_mask, observed_tp
 
-    def impute(self, test_batch, k_samples):
+    def impute(self, test_batch, k_samples, mean=True):
         """Impute the missingness away from a `test_batch`. The number of draws are `k_samples`.
 
         Args:
@@ -304,11 +305,7 @@ class MTAN_ToyDataset():
         dim = self.n_features
         with torch.no_grad():
             test_batch = test_batch.to(self.device)
-            observed_data, observed_mask, observed_tp = (
-                test_batch[:, :, :dim],
-                test_batch[:, :, dim: 2 * dim],
-                test_batch[:, :, -1],
-            )
+            observed_data, observed_mask, observed_tp = self.split_sample(test_batch)
             if args.sample_tp and args.sample_tp < 1:
                 subsampled_data, subsampled_tp, subsampled_mask = utils.subsample_timepoints(
                     observed_data.clone(), observed_tp.clone(), observed_mask.clone(), args.sample_tp)
@@ -321,7 +318,7 @@ class MTAN_ToyDataset():
                 out[:, :, : args.latent_dim],
                 out[:, :, args.latent_dim:],
             )
-            # drar num_sample from normal distr. with 
+            # drar k_sample from normal distr. with 
             epsilon = torch.randn(
                 k_samples, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]
             ).to(self.device)
@@ -333,6 +330,10 @@ class MTAN_ToyDataset():
             )
             # forward pass to decoder
             pred_x = self.decoder(z0, time_steps)
+            pred_x = pred_x.view(k_samples, -1, pred_x.shape[1], pred_x.shape[2])
+            # get the average/mean of all num_sample draws
+            if mean is True:
+                pred_x = pred_x.mean(0)
 
         return pred_x
 

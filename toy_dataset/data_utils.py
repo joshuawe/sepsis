@@ -21,9 +21,10 @@ datasets_dict = {'toydataset_small': {
                                 'path': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_1/synthetic_ts_test_data_eav.csv.gz'
                                 },
                 'toydataset_50000': {
-                                'descr': 'A simple synthetical time series data set with 50000 data samples. Columns include id, time, noise, trend, seasonal, trend+season.'
+                                'name': 'Synthetic Time Series (4 Vars, 50000 samples)',
+                                'descr': 'A simple synthetical time series data set with 50000 data samples. Columns include id, time, noise, trend, seasonal, trend+season.',
                                 'path_train': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_train_40000.csv.gz',
-                                'path_validation': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_validation_5000.csv.gz'
+                                'path_validation': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_validation_5000.csv.gz',
                                 'path_test': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_test_5000.csv.gz'
                                 }
 }
@@ -183,22 +184,37 @@ def get_Toydata_df(path):
 
 
 class ToyDataDf():
-    def __init__(self, path):
+    def __init__(self, path=None, name='Toydataset'):
         """Fetches the Toy Dataset from `path` and returns a `pandas.DataFrame`.
 
         Args:
-            path (str): Path to dataset..
+            path (str, dict): Path to dataset. Or dict containing all information. See `self.set_up_with_dict()`.
         """
         self.path = path
-        self.df = pd.read_csv(path, compression=None)
-        self.df = self.df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)  # time was not sorted
-        self.n_features  = len(self.df.columns) - 2 
+        if isinstance(path, str):
+            self.df = pd.read_csv(path, compression=None)
+            self.df = self.df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)  # time was not sorted
+            self.n_features  = len(self.df.columns) - 2 
+            self.ids = self.df['id'].unique()
+            self.num_samples = len(self.ids)
+        elif isinstance(path, dict):
+            self.set_up_with_dict(path)
+        self.name = name
         self.artificial_missingness = None
         self.artificial_missingness_rate = None
-        self.name = 'Toydataset'
+        return
+
+    def set_up_with_dict(self, path:dict):
+        self.path_train = path['path_train']
+        self.path_validation = path['path_validation']
+        self.path_test = path['path_test']
+        self.name = path['name']
+        self.df = pd.read_csv(self.path_train, compression=None)
+        self.df = self.df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)
+        self.n_features  = len(self.df.columns) - 2 
         self.ids = self.df['id'].unique()
         self.num_samples = len(self.ids)
-        return
+
 
     def __len__(self) -> int:
         return self.num_samples

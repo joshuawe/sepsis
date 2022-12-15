@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pycorruptor as pc
+# from tqdm.notebook import tqdm
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -148,7 +149,7 @@ class ToyDataset(Dataset):
         return self.n_samples
 
     
-def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness_value=-1, batch_size=1, shuffle=False) -> DataLoader:
+def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness_value=-1, batch_size=1, shuffle=False, **kwargs) -> DataLoader:
         """Wrapper function for the Toydataset in order to get the DataLoader directly.
 
         Args:
@@ -251,7 +252,7 @@ class ToyDataDf():
         ind_mask = ind_mask[:,2:]
         return X_intact, X, ind_mask, time_pts, id
 
-    def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=False) -> None:
+    def create_mcar_missingness(self, missingness_rate, missingness_value=np.nan, verbose=True) -> None:
         """Creates MCAR missingness on `self.df`. The first two columns are not included in the missingness process, as they are assumed to be 'id' and 'time'. The dataset with missingness and the corresponding mask are saved in `self.df_mis` and `self.ind_mask`. The shape of `self.df`, `self.df_mis` and `self.ind_mask` is the same.
 
         Args:
@@ -353,7 +354,7 @@ class ToyDataDf():
         return self._base_impute(imputation_func, X, **kwargs)
 
     def _base_impute(self, imputation_func, X:pd.DataFrame=None, helper_func=None, **kwargs):
-        """Base function for simple imputing methods. Groups the time series in the dataset by 'id' and the performs the corresponding imputation method that was passed as argument in `imputation_func`.
+        """Base function for simple imputation methods. Groups the time series in the dataset by 'id' and the performs the corresponding imputation method that was passed as argument in `imputation_func`.
 
         Args:
             imputation_func (class function): The *pandas.DataFrame* function that performes desired imputation method.
@@ -379,7 +380,7 @@ class ToyDataDf():
         # get all time series IDs
         IDs = df['id'].unique()
         # Cycle through each time series ID
-        for id in IDs:
+        for id in tqdm(IDs, desc='Imputing ID'):
             # get only the time series with corresponding ID
             ts = df.loc[df['id'] == id]
             # execute helper function if necessary
@@ -442,7 +443,7 @@ class ToyDataDf():
         # -> Simple imputation methods <-
         if name in ['mean', 'median', 'LOCF', 'NOCB']:
             # For each missingness_rate
-            for m in tqdm(missingness_rates):
+            for m in tqdm(missingness_rates, desc='Missingness rate'):
                 mse = 0
                 # Repeat, to average result
                 for r in range(1, repeat_imputation+1):
@@ -457,7 +458,7 @@ class ToyDataDf():
                 error.append(mse)
         # -> PyPOTS imputation methods <-
         elif name in ['SAITS', 'BRITS']:
-            for m in tqdm(missingness_rates):
+            for m in tqdm(missingness_rates, desc='Missingness rate'):
                 # switch off stdout (no printing to console)
                 out = sys.stdout
                 sys.stdout = open(os.devnull, 'w')
@@ -540,25 +541,30 @@ class ToyDataDf():
     def prepare_mtan(self, log_path='./runs/mTAN', model_args=None, verbose=True, *args, **kwargs) -> None:
         from toy_dataset.utils_mTAN import MTAN_ToyDataset
         # prepare dataloaders for mTAN
-        train_dataloader, test_dataloader = self.prepare_data_mtan()
+        train_dataloader, validation_dataloader = self.prepare_data_mtan()
 
         # instantiate the mTAN model
         n_features = self.n_features
         mtan = MTAN_ToyDataset(n_features, log_path, model_args=model_args, verbose=verbose)
 
         # train/fit the mTAN model
-        mtan.train_model(train_dataloader, test_dataloader, train_extra_epochs=1000)
+        epochs = kwargs.pop('epochs', 100)
+        if mtan.epoch < epochs:
+            mtan.args.niters = epochs
+        else:
+            mtan.args.niter += epochs
         self.mtan = mtan
+        self.mtan.train_model(train_dataloader, validation_dataloader, train_extra_epochs=epochs)
 
         return
 
-    def prepare_data_mtan(self) -> 'tuple[DataLoader, DataLoader]':        
+    def prepare_data_mtan(self, **kwargs) -> 'tuple[DataLoader, DataLoader]':        
         missingness_rate = self.artificial_missingness_rate
         missingness_value = self.artificial_missingness_value
-        train_dataloader = get_Toy_Dataloader(self.path, None, missingness_rate, missingness_value)
-        test_dataloader = train_dataloader
-        print('Warning, train_dataloader and test_dataloader are the same!')
-        return train_dataloader, test_dataloader
+        train_dataloader = get_Toy_Dataloader(self.path_train, None, missingness_rate, missingness_value, batch_size=100)
+        validation_dataloader = get_Toy_Dataloader(self.path_validation, None, missingness_rate, missingness_value, **kwargs)
+        # print('Warning, train_dataloader and validation_dataloader are the same!')
+        return train_dataloader, validation_dataloader
 
     # def _train_mtan(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):
     #     from toy_dataset.utils_mTAN import MTAN_ToyDataset

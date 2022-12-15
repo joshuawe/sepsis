@@ -10,3 +10,7 @@ imputation/latent_ode/lib/__pycache__/
 imputation/latent_ode/logs/
 imputation/__pycache__/
 imputation/runs/
+sepsis_env/
+toy_dataset/__pycache__/
+imputation/models/mTAN/__pycache__/
+toy_dataset/synthetic_ts_4types_50000/

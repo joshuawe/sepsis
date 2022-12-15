@@ -50,40 +50,60 @@ def generate_ts_sample(series_length=100):
     
 
 
-def genereate_ts_dataset(samples, series_length, save_path=None):
+def genereate_ts_dataset(samples, series_length, save_paths=None, normalize=False):
     """Creates Time series dataset with variables: id, time, noise, trend, seasonality, trend + seasonality.
 
     Args:
-        samples (int): The number of individual time series, that comprise the dataset.
+        samples (list[int]): The numbers of individual time series, that comprise the dataset.
         series_length (int): The length of every series.
-        save_path (str): The path (folder + filename + *.csv.gz)
+        save_path (list[str]): The paths (folder + filename + *.csv.gz) (E.g. train, val, test)        normalize (bool): Should all numerical values (apart from time) be normalized to [0,1].
 
     Returns:
         pd.DataFrame: The dataframe containing all the time series.
     """
+    assert (len(samples) == len(save_paths))
     columns = ['id', 'time', 'Noise', 'Trend', 'Seasonality', 'Trend + Season']
     df = pd.DataFrame(columns=columns)
-    time_series_list = list()
-    time_series_list.append(df)
-    for i in tqdm(range(samples)):
-        # create the time series
-        time, noise, trend, seasonality, trend_season = generate_ts_sample(series_length)
-        time = np.arange(series_length)
-        data = np.stack((time, noise, trend, seasonality, trend_season), axis=1)
-        # create the corresponding id
-        id = 'id_' + str(i)
-        # convert into dataframe
-        df_temp = pd.DataFrame(data=data ,columns=columns[1:])
-        df_temp['id'] = id
-        # add to list
-        time_series_list.append(df_temp)
-    # combine
-    df = pd.concat(time_series_list, ignore_index=True)
+    id_counter = 0
+    all_dfs = list()
+    for s in samples:
+        time_series_list = list()
+        time_series_list.append(df.copy())
+        for i in tqdm(range(id_counter, s + id_counter)):
+            # create the time series
+            time, noise, trend, seasonality, trend_season = generate_ts_sample(series_length)
+            time = np.arange(series_length)
+            data = np.stack((time, noise, trend, seasonality, trend_season), axis=1)
+            # create the corresponding id
+            id = 'id_' + str(id_counter + i)
+            # convert into dataframe
+            df_temp = pd.DataFrame(data=data ,columns=columns[1:])
+            df_temp['id'] = id
+            # add to list
+            time_series_list.append(df_temp)
+        # combine
+        all_dfs.append(pd.concat(time_series_list, ignore_index=True))
+        id_counter += s
 
-    if save_path is not None:
-        print(f'Saving dataset under {save_path}\nMake sure to have a *.csv.gz file ending.')
-        df.to_csv(save_path, sep=",", compression=None, index=False)
-    return df
+    # normalize data
+    if normalize:
+        cols = columns[2:]
+        first = all_dfs[0]
+        min = first[columns].min(numeric_only=True)
+        max = first[columns].max(numeric_only=True)
+        for df in all_dfs:
+            df[cols] = normalize_data(df[cols], min, max)
+
+    # save datasets
+    if save_paths is not None:
+        print('Saving. Make sure to have a *.csv.gz file ending.')
+        for save_path, df in zip(save_paths, all_dfs):
+            print(f'Saving dataset under {save_path}')
+            df.to_csv(save_path, sep=",", compression=None, index=False)
+    return all_dfs
+
+def normalize_data(df, min, max):
+    return (df-min) / (max - min)
 
 
 def visualize_new_sample():

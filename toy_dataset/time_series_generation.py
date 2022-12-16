@@ -89,10 +89,11 @@ def genereate_ts_dataset(samples, series_length, save_paths=None, normalize=Fals
     if normalize:
         cols = columns[2:]
         first = all_dfs[0]
-        min = first[columns].min(numeric_only=True)
-        max = first[columns].max(numeric_only=True)
-        for df in all_dfs:
-            df[cols] = normalize_data(df[cols], min, max)
+        min = first[cols].min(numeric_only=True)
+        max = first[cols].max(numeric_only=True)
+        for i in range(len(all_dfs)):
+            data = all_dfs[i]
+            data[cols] = (data[cols]-min) / (max - min)
 
     # save datasets
     if save_paths is not None:
@@ -102,8 +103,6 @@ def genereate_ts_dataset(samples, series_length, save_paths=None, normalize=Fals
             df.to_csv(save_path, sep=",", compression=None, index=False)
     return all_dfs
 
-def normalize_data(df, min, max):
-    return (df-min) / (max - min)
 
 
 def visualize_new_sample():

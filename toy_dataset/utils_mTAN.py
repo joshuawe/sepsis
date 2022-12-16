@@ -14,6 +14,7 @@ from imputation.models.mTAN import models, utils
 class MTAN_ToyDataset():
     def __init__(self, n_features, log_path, model_args=None, verbose=True) -> None:
         self.verbose = verbose
+        self.parse_flag = True
         # parse arguments
         self.parse_arguments(model_args=model_args)
         # create log_path
@@ -40,43 +41,43 @@ class MTAN_ToyDataset():
 
     def parse_arguments(self, model_args=None):
         if model_args is None:
-            model_args = ['--niters', '2000', '--lr', '0.0001', '--batch-size', '2', '--rec-hidden', '32', '--latent-dim', '4', '--length', '20', '--enc', 'mtan_rnn', '--dec', 'mtan_rnn', '--n', '1000',  '--gen-hidden', '50', '--save', '1', '--k-iwae', '5', '--std', '0.01', '--norm', '--learn-emb', '--kl', '--seed', '0', '--num-ref-points', '20', '--dataset', 'toy_josh']
+            model_args = ['--niters', '100', '--lr', '0.001', '--batch-size', '2', '--rec-hidden', '32', '--latent-dim', '4', '--length', '20', '--enc', 'mtan_rnn', '--dec', 'mtan_rnn', '--n', '1000',  '--gen-hidden', '50', '--save', '1', '--k-iwae', '5', '--std', '0.01', '--norm', '--learn-emb', '--kl', '--seed', '0', '--num-ref-points', '20', '--dataset', 'toy_josh']
+            model_args = '--niters 100 --lr 0.001 --batch-size 128 --rec-hidden 32 --latent-dim 4 --length 20 --enc mtan_rnn --dec mtan_rnn --gen-hidden 50 --save 1 --k-iwae 5 --std 0.01 --norm --learn-emb --kl --seed 0 --num-ref-points 20 --dataset toy'.split()
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('--niters', type=int, default=2000, help='Number of epochs')
-        parser.add_argument('--lr', type=float, default=0.01)
-        parser.add_argument('--std', type=float, default=0.01)
-        parser.add_argument('--latent-dim', type=int, default=32)
-        parser.add_argument('--rec-hidden', type=int, default=32)
-        parser.add_argument('--gen-hidden', type=int, default=50)
-        parser.add_argument('--embed-time', type=int, default=128)
-        parser.add_argument('--k-iwae', type=int, default=10)
-        parser.add_argument('--save', type=int, default=1)
-        parser.add_argument('--enc', type=str, default='mtan_rnn')
-        parser.add_argument('--dec', type=str, default='mtan_rnn')
-        parser.add_argument('--fname', type=str, default=None)
-        parser.add_argument('--seed', type=int, default=0)
+        parser.add_argument('--niters', type=int, default=2000, help='Number of epochs.')
+        parser.add_argument('--lr', type=float, default=0.01, help='Learning rate.')
+        parser.add_argument('--std', type=float, default=0.01, help='Unused??? The standard deviation for sampling from latent space.')
+        parser.add_argument('--latent-dim', type=int, default=32, help='Size of latent dimension. For each dimension there will be one mean and standard deviation.')
+        parser.add_argument('--rec-hidden', type=int, default=32, help='Size of hidden layer in encoder.')
+        parser.add_argument('--gen-hidden', type=int, default=50, help='Size of hidden layer in decoder.')
+        parser.add_argument('--embed-time', type=int, default=128, help='????')
+        parser.add_argument('--k-iwae', type=int, default=10, help='Number of samples to be drawn from latent distribution.')
+        parser.add_argument('--save', type=int, default=1, help='Flag, whether the model should be saved.')
+        parser.add_argument('--enc', type=str, default='mtan_rnn', help='Which Encoder model should be used.')
+        parser.add_argument('--dec', type=str, default='mtan_rnn', help='Which decoder model should be used.')
+        parser.add_argument('--fname', type=str, default=None, help='Load pretrained model weights from this path.')
+        parser.add_argument('--seed', type=int, default=0, help='Seed for the randomness generator.')
         parser.add_argument('--n', type=int, default=8000, help='Number of generated data points')
-        parser.add_argument('--batch-size', type=int, default=50)
-        parser.add_argument('--quantization', type=float, default=0.016,
-                            help="Quantization on the physionet dataset.")
-        parser.add_argument('--classif', action='store_true',
-                            help="Include binary classification loss")
-        parser.add_argument('--norm', action='store_true')
-        parser.add_argument('--kl', action='store_true')
-        parser.add_argument('--learn-emb', action='store_true')
-        parser.add_argument('--enc-num-heads', type=int, default=1)
-        parser.add_argument('--dec-num-heads', type=int, default=1)
-        parser.add_argument('--length', type=int, default=20)
-        parser.add_argument('--num-ref-points', type=int, default=128)
-        parser.add_argument('--dataset', type=str, default='toy')
-        parser.add_argument('--enc-rnn', action='store_false')
-        parser.add_argument('--dec-rnn', action='store_false')
-        parser.add_argument('--sample-tp', type=float, default=1.0)
-        parser.add_argument('--only-periodic', type=str, default=None)
-        parser.add_argument('--dropout', type=float, default=0.0)
+        parser.add_argument('--batch-size', type=int, default=50, help='The Batch size.')
+        parser.add_argument('--quantization', type=float, default=0.016, help="Quantization on the physionet dataset.")
+        parser.add_argument('--classif', action='store_true', help="Include binary classification loss")
+        parser.add_argument('--norm', action='store_true', help='???')
+        parser.add_argument('--kl', action='store_true', help='Flag, whether KL (or beta) annealing schedule should be used. If not, the KL weight will be a constant 1.')
+        parser.add_argument('--learn-emb', action='store_true', help='Learn the time embedding.')
+        parser.add_argument('--enc-num-heads', type=int, default=1, help='????')
+        parser.add_argument('--dec-num-heads', type=int, default=1, help='????')
+        parser.add_argument('--length', type=int, default=20, help='????')
+        parser.add_argument('--num-ref-points', type=int, default=128, help='????')
+        parser.add_argument('--dataset', type=str, default='toy', help='Name of dataset to be used.')
+        parser.add_argument('--enc-rnn', action='store_false', help='????')
+        parser.add_argument('--dec-rnn', action='store_false', help='????')
+        parser.add_argument('--sample-tp', type=float, default=1.0, help='Percentage of time points that should be sampled.')
+        parser.add_argument('--only-periodic', type=str, default=None, help='????')
+        parser.add_argument('--dropout', type=float, default=0.0, help='Dropout value for dropout regularization, value in [0,1).')
         self.parser = parser
         self.args = self.parser.parse_args(model_args)
+        self.parse_flag = True
         return
 
     def set_up_model(self, args=None):
@@ -111,7 +112,7 @@ class MTAN_ToyDataset():
             print('parameters encoder/decoder:', utils.count_parameters(self.encoder), utils.count_parameters(self.decoder))
         return
 
-    def set_up_tensorboard(self, path):
+    def set_up_tensorboard(self, path:str):
         # Set up Tensorboard
         self.writer = SummaryWriter(log_dir=path)
         return
@@ -122,13 +123,13 @@ class MTAN_ToyDataset():
         self.decoder.load_state_dict(checkpoint['dec_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.epoch = checkpoint['epoch']
-        print('loading saved weights', checkpoint['epoch'])
-        print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 1))
-        print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 3))
-        print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 10))
-        print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 20))
-        print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 30))
-        print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 50))
+        print('Loading saved weights done. Model trained until epoch ', checkpoint['epoch'])
+        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 1))
+        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 3))
+        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 10))
+        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 20))
+        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 30))
+        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 50))
         return
 
     def train_model(self, train_loader, test_loader, train_extra_epochs=None):
@@ -137,17 +138,18 @@ class MTAN_ToyDataset():
             final_epoch = self.epoch + train_extra_epochs
         else:
             final_epoch = self.args.niters
+        print(f'Begin training! Training until epoch {final_epoch}.')
         # Run through epochs
         for itr in range(self.epoch+1, final_epoch+1):
             train_loss = 0
             train_n = 0
             avg_reconst, avg_kl, mse = 0, 0, 0
             if self.args.kl:
-                wait_until_kl_inc = int(self.args.niters * 0.1)
+                wait_until_kl_inc = int(final_epoch * 0.1)
                 if itr < wait_until_kl_inc:
                     kl_coef = 0.
                 else:
-                    kl_coef = (1 - 0.99 ** (itr - wait_until_kl_inc))
+                    kl_coef = (1 - 0.9 ** (itr - wait_until_kl_inc))
                 self.log_scalar('kl_coefficient', kl_coef, itr)
             else:
                 kl_coef = 1
@@ -201,9 +203,11 @@ class MTAN_ToyDataset():
                 logpx, analytic_kl = utils.compute_losses(
                     dim, train_batch, qz0_mean, qz0_logvar, pred_x, self.args, self.device)
                 loss = -(torch.logsumexp(logpx - kl_coef * analytic_kl, dim=0).mean(0) - np.log(self.args.k_iwae))
+                # optimizer update step
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+                # compute more losses
                 train_loss += loss.item() * batch_len
                 train_n += batch_len
                 avg_reconst += torch.mean(logpx) * batch_len

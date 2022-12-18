@@ -309,9 +309,10 @@ class ToyDataDf():
             pd.DataFrame: The dataset with mean imputation.
         """
         imputation_func = pd.DataFrame.fillna
-        helper_func = pd.DataFrame.mean
-        kwargs = {'helper':{'axis':0, 'numeric_only':True}}
-        return self._base_impute(imputation_func, X, helper_func=helper_func, **kwargs)
+        imputation_func = 'mean'
+        # helper_func = pd.DataFrame.mean
+        kwargs = {'numeric_only':True}
+        return self._base_impute(imputation_func, X, **kwargs)
 
     def impute_median(self, X:pd.DataFrame=None):
         """Perform median imputation on the dataset. Only works if missingness has been created already.
@@ -323,9 +324,10 @@ class ToyDataDf():
             pd.DataFrame: The dataset with median imputation.
         """
         imputation_func = pd.DataFrame.fillna
-        helper_func = pd.DataFrame.median
-        kwargs = {'helper':{'axis':0, 'numeric_only':True}}
-        return self._base_impute(imputation_func, X, helper_func=helper_func, **kwargs)
+        imputation_func = 'median'
+        # helper_func = pd.DataFrame.median
+        kwargs = {'numeric_only':True}
+        return self._base_impute(imputation_func, X, **kwargs)
 
     def impute_LOCF(self, X:pd.DataFrame=None):
         """Perform LOCF (last observation carried forward) imputation on the dataset. Only works if missingness has been created already.
@@ -337,6 +339,7 @@ class ToyDataDf():
             pd.DataFrame: The dataset with LOCF imputation.
         """
         imputation_func = pd.DataFrame.fillna
+        imputation_func = 'fillna'
         kwargs = {'method':'ffill'}
         return self._base_impute(imputation_func, X, **kwargs)
 
@@ -350,6 +353,7 @@ class ToyDataDf():
             pd.DataFrame: The dataset with NOCB imputation.
         """
         imputation_func = pd.DataFrame.fillna
+        imputation_func = 'fillna'
         kwargs = {'method':'backfill'}
         return self._base_impute(imputation_func, X, **kwargs)
 
@@ -357,7 +361,7 @@ class ToyDataDf():
         """Base function for simple imputation methods. Groups the time series in the dataset by 'id' and the performs the corresponding imputation method that was passed as argument in `imputation_func`.
 
         Args:
-            imputation_func (class function): The *pandas.DataFrame* function that performes desired imputation method.
+            imputation_func (str): The string of *pandas.DataFrame* function that performes desired imputation method.
             X (pd.DataFrame, optional): External missing data, for imputation.
             helper_func (class function): A helper function for the imputation to be executed.
             kwargs: The kwargs that are passes as arguments to the `imputation_func`.
@@ -371,27 +375,32 @@ class ToyDataDf():
         if self.artificial_missingness is None:
             raise RuntimeError('First create missingness.')
         # Get helper_function arguments if they exist
-        kw = kwargs.pop('helper', None)
+        # kw = kwargs.pop('helper', None)
         # Check if external data should be used for imputation
         if X is None:
             df = self.df_mis.copy() 
         else:
             df = X.copy()
-        # get all time series IDs
-        IDs = df['id'].unique()
-        # Cycle through each time series ID
-        for id in tqdm(IDs, desc='Imputing ID'):
-            # get only the time series with corresponding ID
-            ts = df.loc[df['id'] == id]
-            # execute helper function if necessary
-            if helper_func is not None:
-                value = helper_func(ts, **kw)
-            else:
-                value = None
-            # get the imputation value for each column
-            impu = imputation_func(ts, value=value, **kwargs)
-            # replace nan values with imputed values
-            df.loc[df['id'] == id] = impu # ts.fillna(impu)
+
+        df = df.fillna(df.groupby('id').transform(imputation_func, **kwargs))
+
+
+        # # get all time series IDs
+        # IDs = df['id'].unique()
+        # # Cycle through each time series ID
+        # for id in tqdm(IDs, desc='Imputing ID'):
+        #     # get only the time series with corresponding ID
+        #     ts = df.loc[df['id'] == id]
+        #     # execute helper function if necessary
+        #     if helper_func is not None:
+        #         value = helper_func(ts, **kw)
+        #     else:
+        #         value = None
+        #     # get the imputation value for each column
+        #     impu = imputation_func(ts, value=value, **kwargs)
+        #     imputed = X.fillna(X.groupby('id').transform('fillna', method='ffill'))
+        #     # replace nan values with imputed values
+        #     df.loc[df['id'] == id] = impu # ts.fillna(impu)
         return df
 
     def _base_impute_helper(self):
@@ -542,20 +551,18 @@ class ToyDataDf():
         from toy_dataset.utils_mTAN import MTAN_ToyDataset
         # prepare dataloaders for mTAN
         train_dataloader, validation_dataloader = self.prepare_data_mtan()
-
         # instantiate the mTAN model
         n_features = self.n_features
-        mtan = MTAN_ToyDataset(n_features, log_path, model_args=model_args, verbose=verbose)
+        self.mtan = MTAN_ToyDataset(n_features, log_path, model_args=model_args, verbose=verbose)
+        return train_dataloader, validation_dataloader
 
+    def train_mtan(self, train_dataloader, validation_dataloader, epochs=100, **kwargs):
         # train/fit the mTAN model
-        epochs = kwargs.pop('epochs', 100)
-        if mtan.epoch < epochs:
-            mtan.args.niters = epochs
+        if self.mtan.epoch < epochs:
+            self.mtan.args.niters = epochs
         else:
-            mtan.args.niter += epochs
-        self.mtan = mtan
-        self.mtan.train_model(train_dataloader, validation_dataloader, train_extra_epochs=epochs)
-
+            self.mtan.args.niters += epochs
+        self.mtan.train_model(train_dataloader, validation_dataloader, train_extra_epochs=epochs, **kwargs)
         return
 
     def prepare_data_mtan(self, **kwargs) -> 'tuple[DataLoader, DataLoader]':        

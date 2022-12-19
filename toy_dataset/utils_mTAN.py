@@ -114,22 +114,24 @@ class MTAN_ToyDataset():
 
     def set_up_tensorboard(self, path:str):
         # Set up Tensorboard
+        self.log_path = path
         self.writer = SummaryWriter(log_dir=path)
+        print('Logging and saving model to: ', path)
         return
 
-    def load_from_checkpoint(self, path):
+    def load_from_checkpoint(self, path, log_path=None):
+        print('\n========================================================')
+        print("Loading model from ", path)
         checkpoint = torch.load(path)
         self.encoder.load_state_dict(checkpoint['rec_state_dict'])
         self.decoder.load_state_dict(checkpoint['dec_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.epoch = checkpoint['epoch']
         print('Loading saved weights done. Model trained until epoch ', checkpoint['epoch'])
-        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 1))
-        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 3))
-        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 10))
-        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 20))
-        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 30))
-        # print('Test MSE', utils.evaluate(dim, rec, dec, test_loader, args, 50))
+        
+        if log_path is not None:
+            self.set_up_tensorboard(log_path)
+        print('========================================================\n')
         return
 
     def train_model(self, train_loader, test_loader, train_extra_epochs=None):
@@ -139,8 +141,12 @@ class MTAN_ToyDataset():
         else:
             final_epoch = self.args.niters
         print(f'Begin training! Training until epoch {final_epoch}.')
+        self.log_scalar('Learning Rate', self.args.lr, self.epoch)
         # Run through epochs
         for itr in range(self.epoch+1, final_epoch+1):
+            # free cache so CUDA GPU memory remains free
+            torch.cuda.empty_cache()
+            self.log_scalar('GPU Memory [GB]', torch.cuda.memory_allocated() / 1024**3, itr)
             train_loss = 0
             train_n = 0
             avg_reconst, avg_kl, mse = 0, 0, 0
@@ -215,19 +221,22 @@ class MTAN_ToyDataset():
                 mse += utils.mean_squared_error(
                     observed_data, pred_x.mean(0), observed_mask) * batch_len
 
-            print('Iter: {}, avg elbo: {:.4f}, avg reconst: {:.4f}, avg kl: {:.4f}, mse: {:.6f}'
-                .format(itr, train_loss / train_n, -avg_reconst / train_n, avg_kl / train_n, mse / train_n))
+            print('Iter: {}, avg elbo: {:.4f}, avg reconst: {:.4f}, avg kl: {:.4f}, mse: {:.6f}, kl_coef: {:.2f}'
+                .format(itr, train_loss / train_n, -avg_reconst / train_n, avg_kl / train_n, mse / train_n, kl_coef))
             self.log_scalar('avg elbo', train_loss / train_n, itr)
             self.log_scalar('avg reconst', -avg_reconst / train_n, itr)
             self.log_scalar('avg kl', avg_kl / train_n, itr)
             self.log_scalar('avg mse', mse / train_n, itr)
             self.epoch += 1
 
-            if itr % 10 == 0:
+            # evaluate model with test_loader
+            if itr % 5 == 0:
                 mse = utils.evaluate(dim, self.encoder, self.decoder, test_loader, self.args, 1)
                 self.log_scalar('Test MSE', mse, itr)
                 print('Test Mean Squared Error', mse)
-            if itr % 10 == 0 and self.args.save:
+
+            # save the model
+            if itr % 5 == 0 and self.args.save:
                 path_save = self.log_path + self.args.dataset + '_' + self.args.enc + '_' + self.args.dec + '.h5'
                 torch.save({
                     'args': self.args,
@@ -237,7 +246,7 @@ class MTAN_ToyDataset():
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'loss': -1 * loss,
                 }, path_save)
-                print("Saved model state.")
+                print(f"Saved model state to {path_save}")
 
     def log_scalar(self, tag, scalar_value, global_step):
         """Writes information for tensorboard as well as into a log dict, so the data can be easily used for analysis and plotting.
@@ -307,6 +316,8 @@ class MTAN_ToyDataset():
         """
         args = self.args
         dim = self.n_features
+        self.encoder.eval()
+        self.decoder.eval()
         with torch.no_grad():
             test_batch = test_batch.to(self.device)
             observed_data, observed_mask, observed_tp = self.split_sample(test_batch)
@@ -338,6 +349,9 @@ class MTAN_ToyDataset():
             # get the average/mean of all num_sample draws
             if mean is True:
                 pred_x = pred_x.mean(0)
+
+        self.encoder.train()
+        self.decoder.train()
 
         return pred_x
 

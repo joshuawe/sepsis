@@ -98,6 +98,7 @@ def evaluate(dim, rec, dec, test_loader, args, num_sample=10, device="cuda"):
             pred_x = pred_x.mean(0)
             mse += mean_squared_error(observed_data, pred_x, observed_mask) * batch
             test_n += batch
+    print('test_n:', test_n)
     return mse / test_n
 
 

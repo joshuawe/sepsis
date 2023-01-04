@@ -46,7 +46,9 @@ class multiTimeAttention(nn.Module):
                  / math.sqrt(d_k)
         scores = scores.unsqueeze(-1).repeat_interleave(dim, dim=-1)
         if mask is not None:
+            # IS THIS WHERE POTENTIALLY GIVEN VALUES ARE MASKED??
             scores = scores.masked_fill(mask.unsqueeze(-3) == 0, -1e9)
+        # Softmax uses exp(), so exp(-1e9)=0
         p_attn = F.softmax(scores, dim = -2)
         if dropout is not None:
             p_attn = dropout(p_attn)

@@ -36,6 +36,8 @@ class MTAN_ToyDataset():
             self.load_from_checkpoint(self.args.fname)
         # set up the log dict
         self.log_dict = self._prepare_log_dict()
+        # add hparams to dict from args
+        self.hparams = vars(self.args)
 
         return
 
@@ -234,6 +236,7 @@ class MTAN_ToyDataset():
                 mse = utils.evaluate(dim, self.encoder, self.decoder, test_loader, self.args, 1)
                 self.log_scalar('Test MSE', mse, itr)
                 print('Test Mean Squared Error', mse)
+                self.writer.add_hparams(self.hparams, {'test_mse': mse})
 
             # save the model
             if itr % 5 == 0 and self.args.save:
@@ -257,7 +260,7 @@ class MTAN_ToyDataset():
             global_step (int): The epoch of training. 
         """
         self.writer.add_scalar(tag, scalar_value, global_step)
-        self.log_dict[tag].append((global_step, scalar_value))
+        # self.log_dict[tag].append((global_step, scalar_value))
 
     def _prepare_log_dict(self):
         """Prepares as log dict with all required keys, so that training information can be added and stored. New information should be added by using the `self.log_scalar()` function. The entries are then `{key1:[(val1,epoch1), (val2, epoch2), ...], key2:[...], ...}`. As the log dict is of the class `defaultdict(list)`, values can be appended to the list of a key, even if the key does not exist yet.
@@ -284,7 +287,7 @@ class MTAN_ToyDataset():
         observed_mask = torch.tensor(ind_mask)
         observed_tp = torch.tensor(time_pts)
         batch_sample = torch.concatenate((observed_data, observed_mask, observed_tp.unsqueeze(1)), dim=1)
-        batch_sample = batch_sample.nan_to_num() # Replace all NAN values with zero.
+        batch_sample = batch_sample.nan_to_num(nan=0.5) # Replace all NAN values with zero.
         return batch_sample.type(torch.float32)
 
     def split_sample(self, batch:torch.Tensor):
@@ -354,6 +357,59 @@ class MTAN_ToyDataset():
         self.decoder.train()
 
         return pred_x
+
+    def impute_new(self, test_batch, k_samples, mean=True, no_drawing=True):
+        """Impute the missingness away from a `test_batch`. The number of draws are `k_samples`.
+
+        Args:
+            test_batch (_type_): The testbatch to be imputed.
+            k_samples (int): Number of samples to be drawn from the latent distribution.
+
+        Returns:
+            _type_: The data with imputed values.
+        """
+        args = self.args
+        dim = self.n_features
+        self.encoder.eval()
+        self.decoder.eval()
+        with torch.no_grad():
+            test_batch = test_batch.to(self.device)
+            observed_data, observed_mask, observed_tp = self.split_sample(test_batch)
+            if args.sample_tp and args.sample_tp < 1:
+                subsampled_data, subsampled_tp, subsampled_mask = utils.subsample_timepoints(
+                    observed_data.clone(), observed_tp.clone(), observed_mask.clone(), args.sample_tp)
+            else:
+                subsampled_data, subsampled_tp, subsampled_mask = \
+                    observed_data, observed_tp, observed_mask
+            # forward pass to encoder
+            out = self.encoder(torch.cat((subsampled_data, subsampled_mask), 2), subsampled_tp)
+            qz0_mean, qz0_logvar = (
+                out[:, :, : args.latent_dim],
+                out[:, :, args.latent_dim:],
+            )
+            # draw k_sample from normal distr. with 
+            epsilon = torch.randn(
+                k_samples, qz0_mean.shape[0], qz0_mean.shape[1], qz0_mean.shape[2]
+            ).to(self.device)
+            if no_drawing is True:
+                epsilon = torch.ones(epsilon.shape).to(self.device)
+            z0 = epsilon * torch.exp(0.5 * qz0_logvar) + qz0_mean
+            z0 = z0.view(-1, qz0_mean.shape[1], qz0_mean.shape[2])
+            batch, seqlen = observed_tp.size()
+            time_steps = (
+                observed_tp[None, :, :].repeat(k_samples, 1, 1).view(-1, seqlen)
+            )
+            # forward pass to decoder
+            pred_x = self.decoder(z0, time_steps)
+            pred_x = pred_x.view(k_samples, -1, pred_x.shape[1], pred_x.shape[2])
+            # get the average/mean of all num_sample draws
+            if mean is True:
+                pred_x = pred_x.mean(0)
+
+        self.encoder.train()
+        self.decoder.train()
+
+        return observed_data, pred_x
 
 
 

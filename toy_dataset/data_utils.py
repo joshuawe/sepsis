@@ -24,7 +24,7 @@ datasets_dict = {'toydataset_small': {
                 'toydataset_50000': {
                                 'name': 'Synthetic Time Series (4 Vars, 50000 samples)',
                                 'descr': 'A simple synthetical time series data set with 50000 data samples. Columns include id, time, noise, trend, seasonal, trend+season.',
-                                'path_train': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_train_40000.csv.gz',
+                                'path_train': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_test_5000.csv.gz',
                                 'path_validation': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_validation_5000.csv.gz',
                                 'path_test': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_test_5000.csv.gz'
                                 }
@@ -62,7 +62,7 @@ class ToyDataset(Dataset):
         if self.missingness_rate in [0,1]: print(f"Attention, missingness_rate = {self.missingness_rate} !")
         # Read in csv
         df = pd.read_csv(path, compression=None)
-        self.input_dim = len(df.columns) - 2  # no 'id' and 'time' column. What about 'time' column?
+        self.input_dim = len(df.columns) - 2  # input dimenstion without 'id' and 'time' column.
         # Sort wrt id, then sort wrt time, ascending
         df = df.sort_values(by=['id', 'time'], ascending=True, ignore_index=True)
         # Number of samples
@@ -120,9 +120,7 @@ class ToyDataset(Dataset):
         X_intact, X, missing_mask, indicating_mask = self.missingness(x, 
                                                                         self.missingness_rate, 
                                                                         self.missingness_value)
-        X_intact = X_intact * missing_mask
-
-        Y = X_intact
+        # X_intact = X_intact * missing_mask
 
         # concatenate all information into X
         # time = time.unsqueeze(1)
@@ -133,9 +131,8 @@ class ToyDataset(Dataset):
         X = X.type(torch.float32)
         missing_mask = missing_mask.type(torch.float32)
         time = time.type(torch.float32)
-        Y = Y.type(torch.float32)
-        sample = X, missing_mask, time, Y
-        sample = torch.concatenate((X_intact, missing_mask, time.unsqueeze(1)), dim=1)
+        # sample = X, missing_mask, time, Y
+        sample = torch.concatenate((X, missing_mask, time.unsqueeze(1)), dim=1)
         sample = sample.type(torch.float32)
         return sample
 
@@ -263,6 +260,7 @@ class ToyDataDf():
         df = self.df.copy()
         # create missingness in data
         df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
+        ind_mask = (ind_mask==0) * 1
         num_values = miss_mask.size
         # add the missingdata back into df
         df.iloc[:,2:] = pd.DataFrame(np.array(df_mis), columns=df.columns[2:])
@@ -547,10 +545,10 @@ class ToyDataDf():
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
         return saits
 
-    def prepare_mtan(self, log_path='./runs/mTAN', model_args=None, verbose=True, *args, **kwargs) -> None:
+    def prepare_mtan(self, log_path='./imputation/runs/mTAN', model_args=None, verbose=True, *args, **kwargs) -> 'tuple[DataLoader, DataLoader]':
         from toy_dataset.utils_mTAN import MTAN_ToyDataset
         # prepare dataloaders for mTAN
-        train_dataloader, validation_dataloader = self.prepare_data_mtan()
+        train_dataloader, validation_dataloader = self.prepare_data_mtan(**kwargs)
         # instantiate the mTAN model
         n_features = self.n_features
         self.mtan = MTAN_ToyDataset(n_features, log_path, model_args=model_args, verbose=verbose)
@@ -568,9 +566,11 @@ class ToyDataDf():
     def prepare_data_mtan(self, **kwargs) -> 'tuple[DataLoader, DataLoader]':        
         missingness_rate = self.artificial_missingness_rate
         missingness_value = self.artificial_missingness_value
-        train_dataloader = get_Toy_Dataloader(self.path_train, None, missingness_rate, missingness_value, batch_size=100)
-        validation_dataloader = get_Toy_Dataloader(self.path_validation, None, missingness_rate, missingness_value, **kwargs)
-        # print('Warning, train_dataloader and validation_dataloader are the same!')
+        batch_size = kwargs.pop('batch_size', 100)
+        train_dataloader = get_Toy_Dataloader(self.path_train, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
+        validation_dataloader = get_Toy_Dataloader(self.path_validation, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
+        print(f'Using batch size {batch_size} for training and validation set.')
+        
         return train_dataloader, validation_dataloader
 
     # def _train_mtan(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):

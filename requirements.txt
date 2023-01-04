@@ -11,5 +11,6 @@ tensorboard
 pandas
 pycorruptor
 tsdb
+ipywidgets
 
 # add jupyter notebook (?)

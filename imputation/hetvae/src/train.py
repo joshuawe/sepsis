@@ -1,8 +1,11 @@
 # pylint: disable=E1101, E0401, E1102, W0621, W0221
 import argparse
+from datetime import datetime
 import numpy as np
 import torch
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+
 
 from random import SystemRandom
 import models
@@ -45,7 +48,9 @@ args = parser.parse_args()
 
 if __name__ == '__main__':
     experiment_id = int(SystemRandom().random() * 10000000)
-    print(args, experiment_id)
+    experiment_id = 'hetvae_' + str(datetime.now().strftime("%Y.%m.%d-%H.%M.%S"))
+    log_dir = 'imputation/runs/' + experiment_id + '/'
+    print(args, '\nexperiment_id:', experiment_id, '\nlog_dir:', log_dir)
     seed = args.seed
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -55,7 +60,8 @@ if __name__ == '__main__':
         'cuda' if torch.cuda.is_available() else 'cpu')
 
     if args.dataset == 'toy':
-        data_obj = utils.get_synthetic_data(args)
+        # data_obj = utils.get_synthetic_data(args)
+        data_obj = utils.get_toydata(args.batch_size)
     elif args.dataset == 'physionet':
         data_obj = utils.get_physionet_data(args.batch_size)
     elif args.dataset == 'mimiciii':
@@ -72,6 +78,19 @@ if __name__ == '__main__':
     optimizer = optim.Adam(params, lr=args.lr)
     print('parameters:', utils.count_parameters(net))
 
+    # Tensorboard Summary Writer
+    writer = SummaryWriter(log_dir=log_dir)
+    # with two plots in one
+    layout = {"Training vs. Validation": {
+                "loss": ["Multiline", ["train_loss", "val_loss"]],
+                "mae": ["Multiline", ["mae_train", "mae_val"]],
+                "mse": ["Multiline", ["mse_train", "mse_val"]],
+                "avg_kl": ["Multiline", ["avg_kl_train", "avg_kl_val"]],
+                "avg_kl": ["Multiline", ["-avg_loglik_train", "-avg_loglik_val"]], 
+                },
+    }
+    writer.add_custom_scalars(layout)
+
     for itr in range(1, args.niters + 1):
         train_loss = 0
         train_n = 0
@@ -81,7 +100,7 @@ if __name__ == '__main__':
             if itr < wait_until_kl_inc:
                 kl_coef = 0.
             else:
-                kl_coef = (1 - 0.999999 ** (itr - wait_until_kl_inc))
+                kl_coef = (1 - 0.999 ** (itr - wait_until_kl_inc))
         elif args.kl_zero:
             kl_coef = 0
         else:
@@ -132,32 +151,47 @@ if __name__ == '__main__':
             mse += loss_info.mse * batch_len
             mae += loss_info.mae * batch_len
             train_n += batch_len
-        print(
-            'Iter: {}, train loss: {:.4f}, avg nll: {:.4f}, avg kl: {:.4f}, '
-            'mse: {:.6f}, mae: {:.6f}'.format(
-                itr,
-                train_loss / train_n,
-                -avg_loglik / train_n,
-                avg_kl / train_n,
-                mse / train_n,
-                mae / train_n
-            )
-        )
-        if itr % 10 == 0:
-            for loader, num_samples in [(val_loader, 5), (test_loader, 100)]:
-                utils.evaluate_hetvae(
-                    net,
-                    dim,
-                    loader,
-                    0.5,
-                    shuffle=False,
-                    k_iwae=num_samples,
+        # log scalars to tensorboard
+        writer.add_scalar('train_loss_train', train_loss / train_n, itr)
+        writer.add_scalar('-avg_loglik_train', -avg_loglik / train_n, itr)
+        writer.add_scalar('avg_kl_train', avg_kl / train_n, itr)
+        writer.add_scalar('mse_train', mse / train_n, itr)
+        writer.add_scalar('mae_train', mae / train_n, itr)
+        writer.add_scalar('kl_coeff_train', kl_coef, itr)
+
+        # print train stats to console 100 times
+        if itr % int(args.niters / 100) == 0:
+            print(
+                'Iter: {}, train loss: {:.4f}, avg nll: {:.4f}, avg kl: {:.4f}, '
+                'mse: {:.6f}, mae: {:.6f}'.format(
+                    itr,
+                    train_loss / train_n,
+                    -avg_loglik / train_n,
+                    avg_kl / train_n,
+                    mse / train_n,
+                    mae / train_n
                 )
-        if itr % 100 == 0 and args.save:
+            )
+
+        # print val and test stats 40 times
+        if itr % int(args.niters / 40) == 0:
+            for loader, num_samples, name in [(val_loader, 5, 'val'), (test_loader, 100, 'test')]:
+                print('   ', name + ':\t', end='')
+                m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, dim, loader, 0.5, shuffle=False, k_iwae=num_samples)
+                # writer.add_scalar('train_loss' + '_' + name, train_loss / train_n, itr)
+                writer.add_scalar('-avg_loglik' + '_' + name, m_avg_loglik, itr)
+                writer.add_scalar('avg_kl' + '_' + name, avg_kl / train_n, itr)
+                writer.add_scalar('mse' + '_' + name, mse, itr)
+                writer.add_scalar('mae' + '_' + name, mae, itr)
+        
+        # save model 20 times
+        if itr % int(args.niters / 20) == 0 and args.save:
+            print('Saved model.')
+            save_path = log_dir + str(experiment_id) + '.h5'
             torch.save({
                 'args': args,
                 'epoch': itr,
                 'state_dict': net.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': train_loss / train_n,
-            }, args.dataset + '_' + str(experiment_id) + '.h5')
+            }, save_path)

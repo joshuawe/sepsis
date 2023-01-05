@@ -106,9 +106,10 @@ def evaluate_hetvae(
             mse / train_n,
             mae / train_n,
             mean_mse / train_n,
-            mean_mae / train_n
-        )
+            mean_mae / train_n,
+        ), flush=True
     )
+    return ( - avg_loglik/train_n, mse/train_n, mae/train_n, mean_mse/train_n, mean_mae/train_n)
 
 
 def get_mimiciii_data(batch_size, test_batch_size=5, filter_anomalies=True):
@@ -294,6 +295,28 @@ def get_synthetic_data(
         "val_dataloader": val_dataloader,
         "input_dim": 1,
         "ground_truth": ground_truth_test,
+    }
+    return data_objects
+
+
+def get_toydata(batch_size):
+    from toy_dataset import data_utils
+
+    name = 'toydataset_50000'
+    path = data_utils.datasets_dict[name]
+    dataset = data_utils.ToyDataDf(path)
+    dataset.create_mcar_missingness(0.3, -1)
+    model_args = '--niters 2000 --lr 0.0001 --batch-size 128 --rec-hidden 16 --latent-dim 64 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 2000 --dataset toy --seed 0 --norm --sample-tp 0.5 --k-iwae 1'.split()
+    train_dataloader, validation_dataloader = dataset.prepare_mtan(model_args=model_args, batch_size=batch_size)
+
+    print('Note: Validation and test dataloader are the same!')
+
+    data_objects = {
+        "train_dataloader": train_dataloader,
+        "test_dataloader": validation_dataloader,
+        "val_dataloader": validation_dataloader,
+        "input_dim": 4,
+        "ground_truth": None,
     }
     return data_objects
 

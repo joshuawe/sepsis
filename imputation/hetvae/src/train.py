@@ -49,7 +49,7 @@ args = parser.parse_args()
 if __name__ == '__main__':
     experiment_id = int(SystemRandom().random() * 10000000)
     experiment_id = 'hetvae_' + str(datetime.now().strftime("%Y.%m.%d-%H.%M.%S"))
-    log_dir = 'imputation/runs/' + experiment_id + '/'
+    log_dir = '~/Documents/sepsis/imputation/runs/' + experiment_id + '/'
     print(args, '\nexperiment_id:', experiment_id, '\nlog_dir:', log_dir)
     seed = args.seed
     torch.manual_seed(seed)

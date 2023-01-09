@@ -291,6 +291,7 @@ class HETVAE():
                     },
         }
         self.writer.add_custom_scalars(layout)
+        print(f'Tensorboard logging to: {path}')
         return
 
     def load_from_checkpoint(self, path, log_path=None):
@@ -310,6 +311,7 @@ class HETVAE():
         args = self.args
         net = self.net
         writer = self.writer
+        self.net.train()
         for itr in range(1, args.niters + 1):
             train_loss = 0
             train_n = 0
@@ -417,29 +419,31 @@ class HETVAE():
                 }, save_path)
 
     def impute(self, batch, num_samples):
-        # impute data
-        batch_len = batch.shape[0]
-        batch = batch.to(self.device)
-        subsampled_mask = torch.zeros_like(
-            batch[:, :, self.n_features:2 * self.n_features]).to(self.device)
-        seqlen = batch.size(1)
-        for i in range(batch_len):
-            length = np.random.randint(low=3, high=10)
-            obs_points = np.sort(
-                np.random.choice(np.arange(seqlen), size=length, replace=False)
-            )
-            subsampled_mask[i, obs_points, :] = 1
-        recon_mask = batch[:, :, self.n_features:2 * self.n_features] - subsampled_mask
-        context_y = torch.cat((
-            batch[:, :, :self.n_features] * subsampled_mask, subsampled_mask
-        ), -1)
-        px, qz = self.net.get_reconstruction(batch[:, :, -1],
-                    context_y,
-                    batch[:, :, -1],
-                    num_samples=num_samples)
-        x_predicted = px.mean.cpu().detach().numpy()
-        x_logvar = px.logvar.cpu().detach().numpy()
-        x_std = np.exp(0.5 * x_logvar)
+        with torch.no_grad():
+            self.net.eval()
+            # impute data
+            batch_len = batch.shape[0]
+            batch = batch.to(self.device)
+            subsampled_mask = torch.zeros_like(
+                batch[:, :, self.n_features:2 * self.n_features]).to(self.device)
+            seqlen = batch.size(1)
+            # for i in range(batch_len):
+            #     length = np.random.randint(low=3, high=10)
+            #     obs_points = np.sort(
+            #         np.random.choice(np.arange(seqlen), size=length, replace=False)
+            #     )
+            #     subsampled_mask[i, obs_points, :] = 1
+            recon_mask = batch[:, :, self.n_features:2 * self.n_features] - subsampled_mask
+            context_y = torch.cat((
+                batch[:, :, :self.n_features] * subsampled_mask, subsampled_mask
+            ), -1)
+            px, qz = self.net.get_reconstruction(batch[:, :, -1],
+                        context_y,
+                        batch[:, :, -1],
+                        num_samples=num_samples)
+            x_predicted = px.mean.cpu().detach().numpy()
+            x_logvar = px.logvar.cpu().detach().numpy()
+            x_std = np.exp(0.5 * x_logvar)
 
         # free memory that otherwise stays blocked on GPU
         torch.cuda.empty_cache()

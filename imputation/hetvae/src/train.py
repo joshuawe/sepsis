@@ -287,7 +287,7 @@ class HETVAE():
                     "mae": ["Multiline", ["mae_train", "mae_val"]],
                     "mse": ["Multiline", ["mse_train", "mse_val"]],
                     "avg_kl": ["Multiline", ["avg_kl_train", "avg_kl_val"]],
-                    "avg_kl": ["Multiline", ["-avg_loglik_train", "-avg_loglik_val"]], 
+                    "-avg_loglik": ["Multiline", ["-avg_loglik_train", "-avg_loglik_val"]], 
                     },
         }
         self.writer.add_custom_scalars(layout)
@@ -382,7 +382,7 @@ class HETVAE():
             writer.add_scalar('kl_coeff_train', kl_coef, itr)
 
             # print train stats to console 100 times
-            if itr % int(args.niters / 100) == 0:
+            if (itr == 1) or (itr % int(args.niters // 100 + 1) == 0):
                 print(
                     'Iter: {}, train loss: {:.4f}, avg nll: {:.4f}, avg kl: {:.4f}, '
                     'mse: {:.6f}, mae: {:.6f}'.format(
@@ -395,8 +395,8 @@ class HETVAE():
                     )
                 )
 
-            # print val and test stats 40 times
-            if itr % int(args.niters / 40) == 0:
+            # calculate and print val and test stats x times
+            if (itr == 1) or (itr % int(args.niters // (100/50) + 1) == 0):
                 for loader, num_samples, name in [(val_loader, 5, 'val')]:
                     print('   ', name + ':\t', end='')
                     m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
@@ -407,7 +407,7 @@ class HETVAE():
                     writer.add_scalar('mae' + '_' + name, mae, itr)
             
             # save model 20 times
-            if itr % int(args.niters / 20) == 0 and args.save:
+            if itr % int(args.niters // (100/5) + 1) == 0 and args.save:
                 print('Saved model.')
                 save_path = self.log_path.joinpath('hetvae.h5')
                 torch.save({
@@ -418,34 +418,42 @@ class HETVAE():
                     'loss': train_loss / train_n,
                 }, save_path)
 
-    def impute(self, batch, num_samples):
+
+    def impute(self, batch, num_samples, sample_tp=0.5, shuffle=False):
+        dim = self.n_features
+        self.net.eval()
         with torch.no_grad():
-            self.net.eval()
-            # impute data
-            batch_len = batch.shape[0]
             batch = batch.to(self.device)
-            subsampled_mask = torch.zeros_like(
-                batch[:, :, self.n_features:2 * self.n_features]).to(self.device)
-            seqlen = batch.size(1)
-            # for i in range(batch_len):
-            #     length = np.random.randint(low=3, high=10)
-            #     obs_points = np.sort(
-            #         np.random.choice(np.arange(seqlen), size=length, replace=False)
-            #     )
-            #     subsampled_mask[i, obs_points, :] = 1
-            recon_mask = batch[:, :, self.n_features:2 * self.n_features] - subsampled_mask
+            subsampled_mask = utils.subsample_timepoints(
+                batch[:, :, dim:2 * dim].clone(),
+                sample_tp,
+                shuffle=shuffle,
+            )
+            recon_mask = batch[:, :, dim:2 * dim] - subsampled_mask
             context_y = torch.cat((
-                batch[:, :, :self.n_features] * subsampled_mask, subsampled_mask
+                batch[:, :, :dim] * subsampled_mask, subsampled_mask
             ), -1)
-            px, qz = self.net.get_reconstruction(batch[:, :, -1],
-                        context_y,
-                        batch[:, :, -1],
-                        num_samples=num_samples)
-            x_predicted = px.mean.cpu().detach().numpy()
-            x_logvar = px.logvar.cpu().detach().numpy()
-            x_std = np.exp(0.5 * x_logvar)
 
-        # free memory that otherwise stays blocked on GPU
-        torch.cuda.empty_cache()
 
-        return  x_predicted, x_std
+            # from compute_unsupervised_loss
+            context_x, context_y, target_x, target_y, num_samples = batch[:, :, -1], context_y, batch[:, :, -1], torch.cat((batch[:, :, :dim] * recon_mask, recon_mask), -1), self.args.k_iwae
+
+            # Get output of decoder: px (and encoder: qz)
+            px, qz = self.net.get_reconstruction(context_x, context_y, target_x, num_samples)
+            pred_mean = px.mean.cpu().numpy()
+            # Convert from logarithmic variance to variance or std. deviation
+            pred_std = torch.exp(0.5 * px.logvar).cpu().numpy()
+            # draw samples and multiply with stdandard deviation and add mean
+            preds = np.random.randn(num_samples // 2, num_samples, pred_mean.shape[1], pred_mean.shape[2], pred_mean.shape[3]) * pred_std + pred_mean
+            # reshape so preds are of shape: [num_samples, batch_size, time_points, features]
+            preds = preds.reshape(-1, pred_mean.shape[1], pred_mean.shape[2], pred_mean.shape[3])
+            # calc mean, with shape: [num_samples, batch_size, time_points, features]
+            pred_mean = preds.mean(0)
+            # calc quantiles
+            std_quantile = 0.68  # In normal distribution 1*std. dev from mean includes 68% of the set.
+            quantile_high = np.quantile(preds, std_quantile, axis=0)
+            quantile_low  = np.quantile(preds, 1-std_quantile, axis=0)
+            # free memory that otherwise stays blocked on GPU
+            torch.cuda.empty_cache()
+
+            return pred_mean, preds, quantile_low, quantile_high

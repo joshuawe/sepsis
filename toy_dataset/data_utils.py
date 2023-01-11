@@ -24,7 +24,7 @@ datasets_dict = {'toydataset_small': {
                 'toydataset_50000': {
                                 'name': 'Synthetic Time Series (4 Vars, 50000 samples)',
                                 'descr': 'A simple synthetical time series data set with 50000 data samples. Columns include id, time, noise, trend, seasonal, trend+season.',
-                                'path_train': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_test_5000.csv.gz',
+                                'path_train': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_train_40000.csv.gz',
                                 'path_validation': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_validation_5000.csv.gz',
                                 'path_test': '/home2/joshua.wendland/Documents/sepsis/toy_dataset/synthetic_ts_4types_50000/synthetic_ts_test_5000.csv.gz'
                                 }

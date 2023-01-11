@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 import numpy as np
 from sklearn import model_selection
+import matplotlib.pyplot as plt
 
 
 def union_time(data_loader, classif=False):
@@ -342,3 +343,45 @@ def subsample_timepoints(mask, percentage_tp_to_sample=None, shuffle=False):
         if mask is not None:
             mask[i, tp_to_set_to_zero] = 0.
     return mask
+
+
+def visualize_sample(dim, batch, pred_mean, ground_truth=None, sample=None, title=''):
+    """(Josh) Visualizing a sample with matplotlib. It will display max 4 features in a 2x2 figure grid. If `sample is None`, a random sample will be drawn from the batch.
+
+    Args:
+        dim (int): Number of features
+        batch (torch.Tensor): A train batch.
+        pred_mean (torch.Tensor): The prediction of the NN based on batch.
+        ground_truth (torch.Tensor, optional): The ground truth. Defaults to None.
+        sample (int, optional): The sample to be displayed from batch. Defaults to None.
+        title (str, optional): Beginning of figure title. Defaults to ''.
+    """
+    if sample is None:
+        sample = np.random.randint(low=0, high=batch.shape[0])
+        title += 'Random '
+        
+    fig = plt.figure()
+    x_time = batch[sample, :, -1]
+    for feature in range(dim):
+        ax = fig.add_subplot(2,2,feature+1)
+        # x_predicted = pred_mean[0, sample, :, feature]
+        x_predicted = pred_mean.mean(axis=0)[sample, :, feature]
+        x_observed = batch[sample,:,feature].cpu()
+        # plot all rows in pred_mean
+        for i in range(pred_mean.shape[0]):
+            plt.scatter(x_time, pred_mean[i,sample,:,feature], alpha=0.2, label='_pred_mean', c='grey')
+
+        plt.scatter(x_time, x_observed, alpha=0.5, label='observed')
+        plt.scatter(x_time, x_predicted, alpha=0.5, label='predicted')
+        # plt.fill_between(x_time, x_predicted+x_logvar, x_predicted-x_logvar, alpha=0.5, color='grey', label='logvar')
+        min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.1
+        max = np.max((x_predicted.max(), x_observed.max())) + 0.1
+        ax.set(xlabel='time', ylabel=f'$X_{feature}$', ylim=(min, max))
+
+
+    mse = utils.mean_squared_error(batch[sample,:,:dim], pred_mean.mean(axis=0)[sample,:,:], batch[sample, :, dim:2*dim])
+    mae = utils.mean_absolute_error(batch[sample,:,:dim], pred_mean.mean(axis=0)[sample,:,:], batch[sample, :, dim:2*dim])
+    plt.legend()
+    plt.suptitle(title + f'Sample {sample}, MSE {mse:.7f}, MAE {mae:.4f}')
+    plt.tight_layout()
+    plt.show()

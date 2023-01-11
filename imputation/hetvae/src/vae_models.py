@@ -8,8 +8,8 @@ from layers import UnTAN
 
 
 class Gaussian:
-    mean = None
-    logvar = None
+    mean = torch.Tensor()
+    logvar = torch.Tensor()
 
 
 class LossInfo:
@@ -110,7 +110,7 @@ class TVAE(nn.Module):
             qz.logvar = self.h2z_var(hidden)
         return qz
 
-    def decode(self, z, target_x):
+    def decode(self, z, target_x) -> Gaussian:
         px = Gaussian()
         num_sample, batch, seqlen, dim = z.size()
         z = z.view(num_sample * batch, seqlen, dim)

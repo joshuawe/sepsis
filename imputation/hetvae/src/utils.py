@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 import numpy as np
 from sklearn import model_selection
+import matplotlib.pyplot as plt
 
 
 def union_time(data_loader, classif=False):
@@ -342,3 +343,57 @@ def subsample_timepoints(mask, percentage_tp_to_sample=None, shuffle=False):
         if mask is not None:
             mask[i, tp_to_set_to_zero] = 0.
     return mask
+
+
+def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, ground_truth=None, print_dims=None, sample=None, title=''):
+    """*(Author: Josh)* Visualizing a sample with matplotlib. It will display max 4 features in a 2x2 figure grid. If `sample is None`, a random sample will be drawn from the batch.
+
+    Args:
+        batch (torch.Tensor): A train batch.
+        pred_mean (torch.Tensor): The prediction of the NN based on batch.
+        quantile_low (np.array): Lower quantile of distribution to be displayed.
+        quantile_high (np.array): Higher quantile of distribution to be displayed.
+        ground_truth (torch.Tensor, optional): The ground truth. Defaults to None.
+        dim (int): Number of features. Can be deduced automatically.
+        sample (int, optional): The sample to be displayed from batch. Defaults to None.
+        title (str, optional): Beginning of figure title. Defaults to ''.
+    """
+    # get num features from batch shape
+    dim = (batch.shape[-1] - 1) / 2
+    assert(dim % 1 == 0), f'dim should be an integer, instead dim = {dim}'
+    dim = int(dim)
+    # define print dims
+    print_dims = print_dims if print_dims is not None else dim
+    if sample is None:
+        sample = np.random.randint(low=0, high=batch.shape[0])
+        title += 'Random '
+        
+    fig = plt.figure(figsize=(9, 2*dim))
+    x_time = batch[sample, :, -1]
+    for feature in range(print_dims):
+        ax = fig.add_subplot(dim,1,feature+1)
+        # x_predicted = pred_mean[0, sample, :, feature]
+        x_predicted = pred_mean[sample, :, feature]
+        x_observed = batch[sample,:,feature].cpu()
+        if quantile_low is not None and quantile_high is not None:
+            ql = quantile_low[sample,:, feature]
+            qh = quantile_high[sample,:, feature]
+            plt.fill_between(x_time, ql, qh, alpha=0.3, facecolor='#65c9f7', step='mid')
+        plt.scatter(x_time, x_observed, alpha=0.5, label='observed')
+        plt.scatter(x_time, x_predicted, alpha=0.5, label='predicted')
+        
+        x = np.array(x_observed)
+        x[x==-1] = np.nan
+        plt.plot(x_time, x, alpha=0.5, label='observed') 
+
+        min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.05
+        max = np.max((x_predicted.max(), x_observed.max())) + 0.05
+        ax.set(xlabel='time', ylabel=f'$X_{feature}$', ylim=(min, max))
+
+
+    mse = mean_squared_error(batch[sample,:,:dim], pred_mean[sample,:,:], batch[sample, :, dim:2*dim])
+    mae = mean_absolute_error(batch[sample,:,:dim], pred_mean[sample,:,:], batch[sample, :, dim:2*dim])
+    plt.legend()
+    plt.suptitle(title + f'Sample {sample}, MSE {mse:.7f}, MAE {mae:.4f}')
+    plt.tight_layout()
+    plt.show()

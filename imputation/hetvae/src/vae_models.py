@@ -8,8 +8,8 @@ from layers import UnTAN
 
 
 class Gaussian:
-    mean = None
-    logvar = None
+    mean = torch.Tensor()
+    logvar = torch.Tensor()
 
 
 class LossInfo:

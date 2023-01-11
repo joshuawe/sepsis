@@ -384,8 +384,9 @@ class HETVAE():
             # print train stats to console 100 times
             if (itr == 1) or (itr % int(args.niters // 100 + 1) == 0):
                 print(
-                    'Iter: {}, train loss: {:.4f}, avg nll: {:.4f}, avg kl: {:.4f}, '
+                    '{:2.0%} Iter: {}, train loss: {:.4f}, avg nll: {:.4f}, avg kl: {:.4f}, '
                     'mse: {:.6f}, mae: {:.6f}'.format(
+                        itr/args.niters,
                         itr,
                         train_loss / train_n,
                         -avg_loglik / train_n,
@@ -396,7 +397,7 @@ class HETVAE():
                 )
 
             # calculate and print val and test stats x times
-            if (itr == 1) or (itr % int(args.niters // (100/50) + 1) == 0):
+            if (itr == 1) or (itr % int(args.niters * (50/100)) == 0):
                 for loader, num_samples, name in [(val_loader, 5, 'val')]:
                     print('   ', name + ':\t', end='')
                     m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
@@ -407,7 +408,7 @@ class HETVAE():
                     writer.add_scalar('mae' + '_' + name, mae, itr)
             
             # save model 20 times
-            if itr % int(args.niters // (100/5) + 1) == 0 and args.save:
+            if itr % int(args.niters * (20/100)) == 0 and args.save:
                 print('Saved model.')
                 save_path = self.log_path.joinpath('hetvae.h5')
                 torch.save({

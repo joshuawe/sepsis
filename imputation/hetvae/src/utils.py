@@ -207,7 +207,8 @@ def get_mimiciii_data(batch_size, test_batch_size=5, filter_anomalies=True):
 
 def get_physionet_data(batch_size, test_batch_size=5):
     input_dim = 41
-    data = np.load("../data/physionet_compressed.npz")
+    # data = np.load("../data/physionet_compressed.npz")
+    data = np.load("/home2/joshua.wendland/Documents/sepsis/imputation/hetvae/data/physionet_compressed.npz")
     train_data, test_data = data['train'], data['test']
     # for interpolation, we dont need a non-overlapping validation set as
     # we can condition on different set of time points from same dataset to
@@ -370,22 +371,23 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         
     fig = plt.figure(figsize=(9, 2*dim))
     x_time = batch[sample, :, -1]
+
     for feature in range(print_dims):
         ax = fig.add_subplot(dim,1,feature+1)
         # x_predicted = pred_mean[0, sample, :, feature]
         x_predicted = pred_mean[sample, :, feature]
         x_observed = batch[sample,:,feature].cpu()
+        plt.plot(x_time, x_predicted, alpha=1, marker='o', label='predicted', c='C1')
+        # plot line of observed
+        x = np.array(x_observed)
+        x[x==-1] = np.nan
+        plt.plot(x_time, x, alpha=0.5, marker='o', label='observed') 
+
         if quantile_low is not None and quantile_high is not None:
             ql = quantile_low[sample,:, feature]
             qh = quantile_high[sample,:, feature]
-            plt.fill_between(x_time, ql, qh, alpha=0.3, facecolor='#65c9f7', step='mid')
-        plt.scatter(x_time, x_observed, alpha=0.5, label='observed')
-        plt.scatter(x_time, x_predicted, alpha=0.5, label='predicted')
-        
-        x = np.array(x_observed)
-        x[x==-1] = np.nan
-        plt.plot(x_time, x, alpha=0.5, label='observed') 
-
+            # plt.fill_between(x_time, ql, qh, alpha=0.3, facecolor='#65c9f7', step='mid')
+            plt.vlines(x_time, ql, qh, color='grey', capstyle='round', linewidths=3, alpha=0.3)
         min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.05
         max = np.max((x_predicted.max(), x_observed.max())) + 0.05
         ax.set(xlabel='time', ylabel=f'$X_{feature}$', ylim=(min, max))

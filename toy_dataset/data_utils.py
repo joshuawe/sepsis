@@ -594,6 +594,23 @@ class ToyDataDf():
 
         
 
+def get_complete_batch(dataloader:DataLoader, dataset:ToyDataDf, sample_num:int):
+    import itertools
+    # batch from dataloader (e.g. for training)
+    batch_size = dataloader.batch_size
+    batch_num = int(np.floor(sample_num/batch_size))
+    batch = next(itertools.islice(dataloader, batch_num, None))
+    sample_in_batch = sample_num % batch_size
+    training_sample = batch[sample_in_batch, ...]
+    
+    # batch from dataset containing ground truth
+    X_intact, X, ind_mask, time_pts, id = dataset.get_sample(sample_num)
+    ground_truth = X_intact
+
+    return ground_truth, training_sample, X
+
+
+
 
 
 

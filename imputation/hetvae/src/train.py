@@ -313,7 +313,9 @@ class HETVAE():
         writer = self.writer
         writer.add_text('hparams', str(self.args), self.epoch)
         self.net.train()
-        for itr in range(self.epoch, args.niters + train_extra_epochs):
+        start = int(self.epoch)
+        end = args.niters if train_extra_epochs==0 else self.epoch+train_extra_epochs
+        for itr in range(start, end):
             train_loss = 0
             train_n = 0
             avg_loglik, avg_kl, mse, mae = 0, 0, 0, 0
@@ -374,7 +376,8 @@ class HETVAE():
                 mse += loss_info.mse * batch_len
                 mae += loss_info.mae * batch_len
                 train_n += batch_len
-                self.epoch += 1
+
+            self.epoch += 1
             # log scalars to tensorboard
             writer.add_scalar('train_loss_train', train_loss / train_n, itr)
             writer.add_scalar('-avg_loglik_train', -avg_loglik / train_n, itr)
@@ -388,7 +391,7 @@ class HETVAE():
                 print(
                     '{:2.0%} Iter: {}, train loss: {:.4f}, avg nll: {:.4f}, avg kl: {:.4f}, '
                     'mse: {:.6f}, mae: {:.6f}'.format(
-                        itr/args.niters,
+                        (itr-start)/(end-start),
                         itr,
                         train_loss / train_n,
                         -avg_loglik / train_n,
@@ -420,6 +423,8 @@ class HETVAE():
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'loss': train_loss / train_n,
                 }, save_path)
+        # Free GPU storage, that might remain reserved otherwise
+        torch.cuda.empty_cache()
 
 
     def impute(self, batch, num_samples, sample_tp=0.5, shuffle=False):

@@ -307,12 +307,13 @@ class HETVAE():
         print('========================================================\n')
         return
 
-    def train_model(self, train_loader, val_loader, train_extra_epochs=None):
+    def train_model(self, train_loader, val_loader, train_extra_epochs=0):
         args = self.args
         net = self.net
         writer = self.writer
+        writer.add_text('hparams', str(self.args), self.epoch)
         self.net.train()
-        for itr in range(1, args.niters + 1):
+        for itr in range(self.epoch, args.niters + train_extra_epochs):
             train_loss = 0
             train_n = 0
             avg_loglik, avg_kl, mse, mae = 0, 0, 0, 0
@@ -373,6 +374,7 @@ class HETVAE():
                 mse += loss_info.mse * batch_len
                 mae += loss_info.mae * batch_len
                 train_n += batch_len
+                self.epoch += 1
             # log scalars to tensorboard
             writer.add_scalar('train_loss_train', train_loss / train_n, itr)
             writer.add_scalar('-avg_loglik_train', -avg_loglik / train_n, itr)
@@ -381,8 +383,8 @@ class HETVAE():
             writer.add_scalar('mae_train', mae / train_n, itr)
             writer.add_scalar('kl_coeff_train', kl_coef, itr)
 
-            # print train stats to console 100 times
-            if (itr == 1) or (itr % int(args.niters // 100 + 1) == 0):
+            # print train stats to console every epoch
+            if (itr == 1) or (itr % 1 == 0):
                 print(
                     '{:2.0%} Iter: {}, train loss: {:.4f}, avg nll: {:.4f}, avg kl: {:.4f}, '
                     'mse: {:.6f}, mae: {:.6f}'.format(
@@ -396,8 +398,8 @@ class HETVAE():
                     )
                 )
 
-            # calculate and print val and test stats x times
-            if (itr == 1) or (itr % int(args.niters * (50/100)) == 0):
+            # calculate and print val and test stats every 2 epochs
+            if (itr == 1) or (itr % 2 == 0) or (itr == args.niters):
                 for loader, num_samples, name in [(val_loader, 5, 'val')]:
                     print('   ', name + ':\t', end='')
                     m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
@@ -407,8 +409,8 @@ class HETVAE():
                     writer.add_scalar('mse' + '_' + name, mse, itr)
                     writer.add_scalar('mae' + '_' + name, mae, itr)
             
-            # save model 20 times
-            if itr % int(args.niters * (20/100)) == 0 and args.save:
+            # save model every 5 epochs
+            if (itr % 5 == 0) or (itr == args.niters) and args.save:
                 print('Saved model.')
                 save_path = self.log_path.joinpath('hetvae.h5')
                 torch.save({

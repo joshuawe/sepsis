@@ -265,6 +265,7 @@ class HETVAE():
         parser.add_argument('--fname', type=str, default=None, help='Path to loading pretrained model.')
         self.parser = parser
         self.args = self.parser.parse_args(model_args.split())
+        self.args_str = model_args
         self.parse_flag = True
         print(f'Model args: {self.args}')
         return
@@ -311,7 +312,7 @@ class HETVAE():
         args = self.args
         net = self.net
         writer = self.writer
-        writer.add_text('hparams', str(self.args), self.epoch)
+        writer.add_text('hparams', self.args_str, self.epoch)
         self.net.train()
         start = int(self.epoch)
         end = args.niters if train_extra_epochs==0 else self.epoch+train_extra_epochs

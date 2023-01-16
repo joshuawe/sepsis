@@ -211,8 +211,6 @@ class HETVAE():
         log_path = Path(log_path) if log_path is not None else Path.home().joinpath('Documents/sepsis/imputation/runs')
         self.log_path = log_path.joinpath(f'{self.args.dataset}/hetvae/{start_time}/')
         print(f'Logging and saving model to: {self.log_path}')
-         # parse arguments
-        self.parse_arguments(model_args=model_args)
         # NUmber of features / variables (also called dim by mTAN author)
         self.n_features = n_features
         # set up CUDA or device for torch
@@ -321,9 +319,9 @@ class HETVAE():
         writer = self.writer
         writer.add_text('hparams', self.args_str, self.epoch)
         # save model_args to *.txt file
-        path = self.log_path + 'model_args.txt'
+        path = self.log_path.joinpath('model_args.txt')
         text_file = open(path, 'w')
-        text_file.write(f'{model_args}')
+        text_file.write(f'{self.args_str}')
         text_file.close()
         self.net.train()
         start = int(self.epoch)

@@ -265,6 +265,7 @@ class HETVAE():
         parser.add_argument('--fname', type=str, default=None, help='Path to loading pretrained model.')
         self.parser = parser
         self.args = self.parser.parse_args(model_args.split())
+        self.args_str = model_args
         self.parse_flag = True
         print(f'Model args: {self.args}')
         return
@@ -311,7 +312,12 @@ class HETVAE():
         args = self.args
         net = self.net
         writer = self.writer
-        writer.add_text('hparams', str(self.args), self.epoch)
+        writer.add_text('hparams', self.args_str, self.epoch)
+        # save model_args to *.txt file
+        path = self.log_path.joinpath('model_args.txt')
+        text_file = open(path, 'w')
+        text_file.write(f'{self.args_str}')
+        text_file.close()
         self.net.train()
         start = int(self.epoch)
         end = args.niters if train_extra_epochs==0 else self.epoch+train_extra_epochs
@@ -405,8 +411,9 @@ class HETVAE():
             if (itr == 1) or (itr % 2 == 0) or (itr == args.niters):
                 for loader, num_samples, name in [(val_loader, 5, 'val')]:
                     print('   ', name + ':\t', end='')
-                    m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
+                    val_loss, m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
                     # writer.add_scalar('train_loss' + '_' + name, train_loss / train_n, itr)
+                    writer.add_scalar('val_loss', val_loss, itr)
                     writer.add_scalar('-avg_loglik' + '_' + name, m_avg_loglik, itr)
                     writer.add_scalar('avg_kl' + '_' + name, avg_kl / train_n, itr)
                     writer.add_scalar('mse' + '_' + name, mse, itr)
@@ -427,7 +434,7 @@ class HETVAE():
         torch.cuda.empty_cache()
 
 
-    def impute(self, batch, num_samples, sample_tp=0.5, shuffle=False):
+    def impute(self, batch, num_samples, sample_tp=1, shuffle=False):
         dim = self.n_features
         self.net.eval()
         with torch.no_grad():

@@ -7,14 +7,20 @@ import matplotlib.pyplot as plt
 
 
 def union_time(data_loader, classif=False):
+    # return all time points of the training data in the data loader, sorted in ascending order.
     tu = []
+    # iterate through each batch
     for batch in data_loader:
         if classif:
             batch = batch[0]
+        # take all time points
         tp = batch[:, :, -1].numpy().flatten()
+        # cycle through each time point from batch
         for val in tp:
+            # add all time points which are not stored in tu yet
             if val not in tu:
                 tu.append(val)
+    # sort all tp
     tu.sort()
     return torch.from_numpy(np.array(tu))
 
@@ -69,7 +75,7 @@ def evaluate_hetvae(
 ):
     torch.manual_seed(seed=0)
     np.random.seed(seed=0)
-    train_n = 0
+    val_loss, train_n = 0, 0
     avg_loglik, mse, mae = 0, 0, 0
     mean_mae, mean_mse = 0, 0
     with torch.no_grad():
@@ -94,6 +100,7 @@ def evaluate_hetvae(
                 num_samples=k_iwae,
             )
             num_context_points = recon_mask.sum().item()
+            val_loss += loss_info.composite_loss.item() 
             mse += loss_info.mse * num_context_points
             mae += loss_info.mae * num_context_points
             mean_mse += loss_info.mean_mse * num_context_points
@@ -110,7 +117,7 @@ def evaluate_hetvae(
             mean_mae / train_n,
         ), flush=True
     )
-    return ( - avg_loglik/train_n, mse/train_n, mae/train_n, mean_mse/train_n, mean_mae/train_n)
+    return ( val_loss/train_n, - avg_loglik/train_n, mse/train_n, mae/train_n, mean_mse/train_n, mean_mae/train_n)
 
 
 def get_mimiciii_data(batch_size, test_batch_size=5, filter_anomalies=True):
@@ -216,7 +223,7 @@ def get_physionet_data(batch_size, test_batch_size=5):
     _, val_data = model_selection.train_test_split(
         train_data, train_size=0.8, random_state=11, shuffle=True
     )
-    print(train_data.shape, test_data.shape)
+    print('train_data.shape', train_data.shape, '\ttest_data.shape', test_data.shape)
 
     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
     test_dataloader = DataLoader(test_data, batch_size=test_batch_size, shuffle=False)
@@ -370,32 +377,58 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         title += 'Random '
         
     fig = plt.figure(figsize=(9, 2*dim))
-    x_time = batch[sample, :, -1]
+    # only use the required sample from the batches
+    batch = batch[sample, :, :]
+    pred_mean = pred_mean[sample, :, :]
+    quantile_low  = quantile_low[sample, :, :]
+    quantile_high = quantile_high[sample, :, :]
+
+    print(batch.shape)
+
+    # only use time points, where the t>0 to clip out padding
+    time_points = (batch[:,-1] != 0)
+    pred_mean = pred_mean[time_points]
+    if quantile_low is not None and quantile_high is not None:
+            quantile_low  = quantile_low[time_points]
+            quantile_high = quantile_high[time_points]
+    batch = batch[time_points]
+    x_time = batch[:, -1]
+
+    print(batch.shape)
 
     for feature in range(print_dims):
         ax = fig.add_subplot(dim,1,feature+1)
         # x_predicted = pred_mean[0, sample, :, feature]
-        x_predicted = pred_mean[sample, :, feature]
-        x_observed = batch[sample,:,feature].cpu()
-        plt.plot(x_time, x_predicted, alpha=1, marker='o', label='predicted', c='C1')
+        x_predicted = pred_mean[:, feature]
+        x_observed = batch[:,feature].cpu()
+        x_mask = batch[:, dim+feature].cpu()
+        plt.plot(x_time, x_predicted, alpha=0.7, marker='o', label='predicted', c='C1')
         # plot line of observed
         x = np.array(x_observed)
-        x[x==-1] = np.nan
-        plt.plot(x_time, x, alpha=0.5, marker='o', label='observed') 
+        x[x_mask==0] = np.nan
+        plt.plot(x_time, x, alpha=0.5, marker='o', label='observed', c='C3') 
+        x_masked = np.array(x_observed)
+        x_masked[x_mask==1] = np.nan
+        plt.scatter(x_time, x_masked, marker='o', alpha=0.5, label='masked', c='C0')
 
         if quantile_low is not None and quantile_high is not None:
-            ql = quantile_low[sample,:, feature]
-            qh = quantile_high[sample,:, feature]
+            ql = quantile_low[:, feature]
+            qh = quantile_high[:, feature]
             # plt.fill_between(x_time, ql, qh, alpha=0.3, facecolor='#65c9f7', step='mid')
             plt.vlines(x_time, ql, qh, color='grey', capstyle='round', linewidths=3, alpha=0.3)
-        min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.05
-        max = np.max((x_predicted.max(), x_observed.max())) + 0.05
+        # set labels and limits
+        min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.1
+        max = np.max((x_predicted.max(), x_observed.max())) + 0.1
         ax.set(xlabel='time', ylabel=f'$X_{feature}$', ylim=(min, max))
 
+        if feature==0:
+            plt.legend(loc='lower center', ncol=5)
 
-    mse = mean_squared_error(batch[sample,:,:dim], pred_mean[sample,:,:], batch[sample, :, dim:2*dim])
-    mae = mean_absolute_error(batch[sample,:,:dim], pred_mean[sample,:,:], batch[sample, :, dim:2*dim])
-    plt.legend()
-    plt.suptitle(title + f'Sample {sample}, MSE {mse:.7f}, MAE {mae:.4f}')
+
+    mse = mean_squared_error(batch[:,:dim], pred_mean[:,:], batch[:, dim:2*dim])
+    mae = mean_absolute_error(batch[:,:dim], pred_mean[:,:], batch[:, dim:2*dim])
+    plt.legend(loc='lower center', ncol=5)
+    fig.suptitle(title + f'Sample {sample}, MSE {mse:.7f}, MAE {mae:.4f}')
     plt.tight_layout()
+    fig.subplots_adjust(top=0.975)
     plt.show()

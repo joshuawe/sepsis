@@ -268,6 +268,11 @@ class HETVAE():
         self.args_str = model_args
         self.parse_flag = True
         print(f'Model args: {self.args}')
+        # save model_args to *.txt file
+        path = self.log_path + 'model_args.txt'
+        text_file = open(path, 'w')
+        text_file.write(f'{model_args}')
+        text_file.close()
         return
 
     def set_up_model(self, args=None):

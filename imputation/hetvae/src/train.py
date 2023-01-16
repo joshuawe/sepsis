@@ -411,8 +411,9 @@ class HETVAE():
             if (itr == 1) or (itr % 2 == 0) or (itr == args.niters):
                 for loader, num_samples, name in [(val_loader, 5, 'val')]:
                     print('   ', name + ':\t', end='')
-                    m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
+                    val_loss, m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
                     # writer.add_scalar('train_loss' + '_' + name, train_loss / train_n, itr)
+                    writer.add_scalar('val_loss', val_loss, itr)
                     writer.add_scalar('-avg_loglik' + '_' + name, m_avg_loglik, itr)
                     writer.add_scalar('avg_kl' + '_' + name, avg_kl / train_n, itr)
                     writer.add_scalar('mse' + '_' + name, mse, itr)

@@ -268,11 +268,6 @@ class HETVAE():
         self.args_str = model_args
         self.parse_flag = True
         print(f'Model args: {self.args}')
-        # save model_args to *.txt file
-        path = self.log_path + 'model_args.txt'
-        text_file = open(path, 'w')
-        text_file.write(f'{model_args}')
-        text_file.close()
         return
 
     def set_up_model(self, args=None):
@@ -438,7 +433,7 @@ class HETVAE():
         torch.cuda.empty_cache()
 
 
-    def impute(self, batch, num_samples, sample_tp=0.5, shuffle=False):
+    def impute(self, batch, num_samples, sample_tp=1, shuffle=False):
         dim = self.n_features
         self.net.eval()
         with torch.no_grad():

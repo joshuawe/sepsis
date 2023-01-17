@@ -100,7 +100,7 @@ def evaluate_hetvae(
                 num_samples=k_iwae,
             )
             num_context_points = recon_mask.sum().item()
-            val_loss += loss_info.composite_loss.item() 
+            val_loss += loss_info.composite_loss.item() * num_context_points
             mse += loss_info.mse * num_context_points
             mae += loss_info.mae * num_context_points
             mean_mse += loss_info.mean_mse * num_context_points

@@ -204,7 +204,7 @@ class TVAE(nn.Module):
         return utils.mean_absolute_error(target, pred.mean(0), mask)
 
     def compute_unsupervised_loss(
-        self, context_x, context_y, target_x, target_y, num_samples=1, beta=1.
+        self, context_x, context_y, target_x, target_y, num_samples=1, beta=1., ground_truth=None
     ):
         loss_info = LossInfo()
         px, qz = self.get_reconstruction(context_x, context_y, target_x, num_samples)
@@ -223,6 +223,28 @@ class TVAE(nn.Module):
         loss_info.mogloglik = self.compute_mog_loglik(target_y, px)
         loss_info.composite_loss = self.elbo_weight * loss_info.elbo \
             + self.mse_weight * loss_info.mse
+            
+        # in case ground_truth is also passed
+        if ground_truth is not None:
+            loss_gt = LossInfo()
+            # invert the mask, so now data is labelled as 'observed', which was previously hidden and vice versa
+            mask = (mask == 0) * 1
+            target_gt = torch.concatenate((ground_truth, mask), dim=-1)
+            loglik = self.compute_loglik(target_gt, px, self.norm)
+            kl = self.kl_div(qz, mask, self.norm)
+            loss_gt.elbo = -(torch.logsumexp(loglik - beta * kl, dim=0).mean(0)
+                             - np.log(num_samples))
+            loss_gt.kl = kl.mean()
+            loss_gt.loglik = loglik.mean()
+            loss_gt.mse = self.compute_mse(target_gt, px.mean)
+            loss_gt.mae = self.compute_mae(target_gt, px.mean)
+            loss_gt.mean_mse = self.compute_mean_mse(target_gt, px.mean)
+            loss_gt.mean_mae = self.compute_mean_mae(target_gt, px.mean)
+            loss_gt.mogloglik = self.compute_mog_loglik(target_gt, px)
+            loss_gt.composite_loss = self.elbo_weight * loss_info.elbo \
+                + self.mse_weight * loss_info.mse
+            # add ground truth loss to the Loss object
+            loss_info.loss_gt = loss_gt
         return loss_info
 
 

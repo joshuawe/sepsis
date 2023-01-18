@@ -598,12 +598,12 @@ def get_sample_train_ground_truth(dataloader:DataLoader, dataset:ToyDataDf, samp
     """Get a single sample. The training sample with the corresponding ground truth sample.
 
     Args:
-        dataloader (DataLoader): _description_
-        dataset (ToyDataDf): _description_
-        sample_num (int): _description_
+        dataloader (DataLoader): Train dataloader.
+        dataset (ToyDataDf): Dataset containing ground truth.
+        sample_num (int): Number of sample, that should be returned.
 
     Returns:
-        _type_: _description_
+        list[torch.Tensor, torch.Tensor]: ground_truth, training_sample
     """
     import itertools
     # batch from dataloader (e.g. for training)
@@ -619,6 +619,34 @@ def get_sample_train_ground_truth(dataloader:DataLoader, dataset:ToyDataDf, samp
 
     return ground_truth, training_sample
 
+
+def get_batch_train_ground_truth(dataloader:DataLoader, dataset:ToyDataDf, batch_num:int):
+    """Get a single sample. The training sample with the corresponding ground truth sample.
+
+    Args:
+        dataloader (DataLoader): Train dataloader.
+        dataset (ToyDataDf): Dataset containing ground truth.
+        batch_num (int): Number of batch, that should be returned.
+
+    Returns:
+        list[torch.Tensor, torch.Tensor]: ground_truth, training_batch
+    """
+    import itertools
+    # batch from dataloader (e.g. for training)
+    batch_size = dataloader.batch_size
+    training_batch = next(itertools.islice(dataloader, batch_num, None))
+    
+    ground_truth = []
+    # iterate through all nececssary sample numbers, as slices are not yet supported
+    sample_num_min = batch_num * batch_size
+    sample_num_max = sample_num_min + batch_size
+    for sample_num in range(sample_num_min, sample_num_max):
+        X_intact, X, ind_mask, time_pts, id = dataset.get_sample(sample_num)
+        ground_truth.append(X_intact)
+        
+    ground_truth = np.array(ground_truth)
+
+    return ground_truth, training_batch
 
 
 

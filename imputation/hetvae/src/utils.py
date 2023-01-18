@@ -380,8 +380,11 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
     # only use the required sample from the batches
     batch = batch[sample, :, :]
     pred_mean = pred_mean[sample, :, :]
-    quantile_low  = quantile_low[sample, :, :]
-    quantile_high = quantile_high[sample, :, :]
+    if quantile_low is not None and quantile_high is not None:
+        quantile_low  = quantile_low[sample, :, :]
+        quantile_high = quantile_high[sample, :, :]
+    if ground_truth is not None:
+        ground_truth[sample, :, :]
 
     print(batch.shape)
 
@@ -402,15 +405,20 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         x_predicted = pred_mean[:, feature]
         x_observed = batch[:,feature].cpu()
         x_mask = batch[:, dim+feature].cpu()
+        # plot prediction
         plt.plot(x_time, x_predicted, alpha=0.7, marker='o', label='predicted', c='C1')
-        # plot line of observed
+        # plot observed
         x = np.array(x_observed)
         x[x_mask==0] = np.nan
         plt.plot(x_time, x, alpha=0.5, marker='o', label='observed', c='C3') 
+        # plot masked 
         x_masked = np.array(x_observed)
         x_masked[x_mask==1] = np.nan
         plt.scatter(x_time, x_masked, marker='o', alpha=0.5, label='masked', c='C0')
-
+        # plot ground truth
+        if ground_truth is not None:
+            plt.plot(x_time, ground_truth, c='black', label='ground truth')
+        # plot quantiles (uncertainty)
         if quantile_low is not None and quantile_high is not None:
             ql = quantile_low[:, feature]
             qh = quantile_high[:, feature]

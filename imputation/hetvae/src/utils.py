@@ -414,12 +414,13 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         if quantile_low is not None and quantile_high is not None:
             ql = quantile_low[:, feature]
             qh = quantile_high[:, feature]
-            # plt.fill_between(x_time, ql, qh, alpha=0.3, facecolor='#65c9f7', step='mid')
-            plt.vlines(x_time, ql, qh, color='grey', capstyle='round', linewidths=3, alpha=0.3)
+            plt.fill_between(x_time, ql, qh, alpha=0.45, facecolor='#65c9f7', interpolate=True)
+            # plt.vlines(x_time, ql, qh, color='grey', capstyle='round', linewidths=3, alpha=0.3)
         # set labels and limits
         min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.1
         max = np.max((x_predicted.max(), x_observed.max())) + 0.1
         ax.set(xlabel='time', ylabel=f'$X_{feature}$', ylim=(min, max))
+        ax.set_xticks(np.arange(0,50,5), minor=True)
 
         if feature==0:
             plt.legend(loc='lower center', ncol=5)

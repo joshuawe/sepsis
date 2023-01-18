@@ -594,7 +594,17 @@ class ToyDataDf():
 
         
 
-def get_complete_batch(dataloader:DataLoader, dataset:ToyDataDf, sample_num:int):
+def get_sample_train_ground_truth(dataloader:DataLoader, dataset:ToyDataDf, sample_num:int):
+    """Get a single sample. The training sample with the corresponding ground truth sample.
+
+    Args:
+        dataloader (DataLoader): _description_
+        dataset (ToyDataDf): _description_
+        sample_num (int): _description_
+
+    Returns:
+        _type_: _description_
+    """
     import itertools
     # batch from dataloader (e.g. for training)
     batch_size = dataloader.batch_size
@@ -607,7 +617,7 @@ def get_complete_batch(dataloader:DataLoader, dataset:ToyDataDf, sample_num:int)
     X_intact, X, ind_mask, time_pts, id = dataset.get_sample(sample_num)
     ground_truth = X_intact
 
-    return ground_truth, training_sample, X
+    return ground_truth, training_sample
 
 
 

@@ -308,7 +308,7 @@ class HETVAE():
         print('========================================================\n')
         return
 
-    def train_model(self, train_loader, val_loader, train_extra_epochs=0):
+    def train_model(self, train_loader, val_loader, ground_truth_loader=None, train_extra_epochs=0):
         args = self.args
         net = self.net
         writer = self.writer
@@ -408,19 +408,22 @@ class HETVAE():
                 )
 
             # calculate and print val and test stats every 2 epochs
-            if (itr == 1) or (itr % 2 == 0) or (itr == args.niters):
+            if (itr == 1) or (itr % 2 == 0) or (itr == end-1):
                 for loader, num_samples, name in [(val_loader, 5, 'val')]:
-                    print('   ', name + ':\t', end='')
-                    val_loss, m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, loader, 0.5, shuffle=False, k_iwae=num_samples)
-                    # writer.add_scalar('train_loss' + '_' + name, train_loss / train_n, itr)
-                    writer.add_scalar('val_loss', val_loss, itr)
-                    writer.add_scalar('-avg_loglik' + '_' + name, m_avg_loglik, itr)
-                    writer.add_scalar('avg_kl' + '_' + name, avg_kl / train_n, itr)
-                    writer.add_scalar('mse' + '_' + name, mse, itr)
-                    writer.add_scalar('mae' + '_' + name, mae, itr)
+                    pass
+                name = 'val'
+                
+                print('   ', name + ':\t', end='')
+                val_loss, m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, val_loader, ground_truth_loader,sample_tp=0.5, shuffle=False, k_iwae=10)
+                # writer.add_scalar('train_loss' + '_' + name, train_loss / train_n, itr)
+                writer.add_scalar('val_loss', val_loss, itr)
+                writer.add_scalar('-avg_loglik' + '_' + name, m_avg_loglik, itr)
+                writer.add_scalar('avg_kl' + '_' + name, avg_kl / train_n, itr)
+                writer.add_scalar('mse' + '_' + name, mse, itr)
+                writer.add_scalar('mae' + '_' + name, mae, itr)
             
             # save model every 5 epochs
-            if (itr % 5 == 0) or (itr == args.niters) and args.save:
+            if (itr % 5 == 0) or (itr == end-1) and args.save:
                 print('Saved model.')
                 save_path = self.log_path.joinpath('hetvae.h5')
                 torch.save({

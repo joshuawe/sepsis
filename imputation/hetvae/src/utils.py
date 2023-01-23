@@ -71,7 +71,7 @@ def evaluate_hetvae(
     ground_truth_loader = None,
     sample_tp=0.5,
     shuffle=False,
-    k_iwae=1,
+    k_iwae=5,
     device='cuda',
 ):
     torch.manual_seed(seed=0)

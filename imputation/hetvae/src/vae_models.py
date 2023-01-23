@@ -23,6 +23,7 @@ class LossInfo:
     mean_mae = None
     mogloglik = None
     composite_loss = None
+    ground_truth = None
 
 
 class TVAE(nn.Module):
@@ -205,7 +206,7 @@ class TVAE(nn.Module):
 
     def compute_unsupervised_loss(
         self, context_x, context_y, target_x, target_y, num_samples=1, beta=1., ground_truth=None
-    ):
+    ) -> LossInfo:
         loss_info = LossInfo()
         px, qz = self.get_reconstruction(context_x, context_y, target_x, num_samples)
         mask = target_y[:, :, self.dim:]

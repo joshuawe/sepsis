@@ -117,9 +117,11 @@ class ToyDataset(Dataset):
         # X = Original input with artificial missingness
         # missing_mask = Mask indicating all missing values in X
         # indicating_mask = Mask indicating all artificially missing values in X
-        X_intact, X, missing_mask, indicating_mask = self.missingness(x, 
-                                                                        self.missingness_rate, 
-                                                                        self.missingness_value)
+        X_intact, X, missing_mask, indicating_mask = self.missingness(
+                                                                    x, 
+                                                                    self.missingness_rate, 
+                                                                    self.missingness_value
+        )
         # X_intact = X_intact * missing_mask
 
         # concatenate all information into X
@@ -146,8 +148,9 @@ class ToyDataset(Dataset):
         return self.n_samples
 
     
-def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness_value=-1, batch_size=1, shuffle=False, **kwargs) -> DataLoader:
+def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness_value=-1, batch_size=1, shuffle=False, **kwargs) -> 'tuple[DataLoader, DataLoader]':
         """Wrapper function for the Toydataset in order to get the DataLoader directly.
+        Returns the expected `dataloader` together with a `ground_truth_dataloader`, which does not contain any missingness. This is of course only the case, when the `missingness_rate != 0`. If it is 0, then the `ground_truth_loader` is `None`.
 
         Args:
             path (str): Path to dataset.
@@ -158,14 +161,20 @@ def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness
             shuffle (bool, optional): Shuffle the samples in DataLoader. Defaults to False.
 
         Returns:
-            torch.DataLoader: The Dataloader for the Toy Dataset.
+            tuple(torch.DataLoader, torch.DataLoader): The Dataloaders for the Toy Dataset. Regular dataloader together with ground_truth_loader.
         """
         # create dataset
         dataset = ToyDataset(path, missingness=missingness, missingness_rate=missingness_rate, missingness_value=missingness_value)
 
         dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle, prefetch_factor=12, num_workers=3)
+        
+        if missingness_rate != 0:
+            ground_truth_dataset = ToyDataset(path, missingness=None, missingness_rate=0, missingness_value=missingness_value)
+            ground_truth_loader = DataLoader(dataset=ground_truth_dataset, batch_size=batch_size, shuffle=shuffle, prefetch_factor=12, num_workers=3)
+        else:
+            ground_truth_loader = None
 
-        return dataloader
+        return dataloader, ground_truth_loader
 
 def get_Toydata_df(path):
     """Fetches the Toy Dataset from `path` and returns a `pandas.DataFrame`.
@@ -548,11 +557,11 @@ class ToyDataDf():
     def prepare_mtan(self, log_path='./imputation/runs/mTAN', model_args=None, verbose=True, *args, **kwargs) -> 'tuple[DataLoader, DataLoader]':
         from toy_dataset.utils_mTAN import MTAN_ToyDataset
         # prepare dataloaders for mTAN
-        train_dataloader, validation_dataloader = self.prepare_data_mtan(**kwargs)
+        dataloader_dict = self.prepare_data_mtan(**kwargs)
         # instantiate the mTAN model
         n_features = self.n_features
         self.mtan = MTAN_ToyDataset(n_features, log_path, model_args=model_args, verbose=verbose)
-        return train_dataloader, validation_dataloader
+        return dataloader_dict
 
     def train_mtan(self, train_dataloader, validation_dataloader, epochs=100, **kwargs):
         # train/fit the mTAN model
@@ -561,17 +570,25 @@ class ToyDataDf():
         else:
             self.mtan.args.niters += epochs
         self.mtan.train_model(train_dataloader, validation_dataloader, train_extra_epochs=epochs, **kwargs)
-        return
+        return 
 
-    def prepare_data_mtan(self, **kwargs) -> 'tuple[DataLoader, DataLoader]':        
+    def prepare_data_mtan(self, **kwargs) -> dict:        
         missingness_rate = self.artificial_missingness_rate
         missingness_value = self.artificial_missingness_value
         batch_size = kwargs.pop('batch_size', 100)
-        train_dataloader = get_Toy_Dataloader(self.path_train, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
-        validation_dataloader = get_Toy_Dataloader(self.path_validation, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
+        train_dataloader, gt_train_dataloader = get_Toy_Dataloader(self.path_train, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
+        validation_dataloader, gt_validation_dataloader = get_Toy_Dataloader(self.path_validation, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
         print(f'Using batch size {batch_size} for training and validation set.')
         
-        return train_dataloader, validation_dataloader
+        dataloader_dict = {
+            'train': train_dataloader,
+            'train_ground_truth': gt_train_dataloader,
+            'validation': validation_dataloader,
+            'validation_ground_truth': gt_validation_dataloader
+        }
+        
+        
+        return dataloader_dict
     
     
     def get_dataloaders(self, **kwargs):

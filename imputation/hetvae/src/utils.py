@@ -404,26 +404,29 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         x_predicted = pred_mean[:, feature]
         x_observed = batch[:,feature].cpu()
         x_mask = batch[:, dim+feature].cpu()
-        # plot prediction
+        # 1) plot prediction
         plt.plot(x_time, x_predicted, alpha=0.7, marker='o', label='predicted', c='C1')
-        # plot observed
+        # 2) plot observed
         x = np.array(x_observed)
         x[x_mask==0] = np.nan
-        plt.scatter(x_time, x, alpha=1, marker='o', label='observed', facecolor='None', edgecolor='black')
-        # only plot, if ground_truth is not there
+        if ground_truth is None:
+            plt.scatter(x_time, x, alpha=1, marker='o', label='observed', facecolor='None', edgecolor='black')
+        else:
+            plt.plot(x_time, x, alpha=1, marker='o', label='observed', markerfacecolor='None', markeredgecolor='black', color='black')
+        # 3) plot masked: only plot, if ground_truth is not there
         if ground_truth is None: 
             # plot masked 
             x_masked = np.array(x_observed)
             x_masked[x_mask==1] = np.nan
             plt.scatter(x_time, x_masked, marker='o', alpha=0.5, label='masked', c='C0')
-        # plot ground truth
+        # 4) plot ground truth
         if ground_truth is not None:
             plt.plot(x_time, ground_truth[:, feature], alpha=1, c='C3', ls='-', label='ground truth')
-        # plot quantiles (uncertainty)
+        # 5) plot quantiles (uncertainty)
         if quantile_low is not None and quantile_high is not None:
             ql = quantile_low[:, feature]
-            qh = quantile_high[:, feature]
-            plt.fill_between(x_time, ql, qh, alpha=0.45, facecolor='#65c9f7', interpolate=True)
+            qh = quantile_high[:, feature] 
+            plt.fill_between(x_time, ql, qh, alpha=0.45, facecolor='#65c9f7', interpolate=True, label='uncertainty')
             # plt.vlines(x_time, ql, qh, color='grey', capstyle='round', linewidths=3, alpha=0.3)
         # set labels and limits
         min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.1

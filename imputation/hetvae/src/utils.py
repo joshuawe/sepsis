@@ -68,9 +68,10 @@ def evaluate_hetvae(
     net,
     dim,
     train_loader,
+    ground_truth_loader = None,
     sample_tp=0.5,
     shuffle=False,
-    k_iwae=1,
+    k_iwae=5,
     device='cuda',
 ):
     torch.manual_seed(seed=0)
@@ -379,22 +380,23 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
     fig = plt.figure(figsize=(9, 2*dim))
     # only use the required sample from the batches
     batch = batch[sample, :, :]
-    pred_mean = pred_mean[sample, :, :]
-    quantile_low  = quantile_low[sample, :, :]
-    quantile_high = quantile_high[sample, :, :]
-
-    print(batch.shape)
-
     # only use time points, where the t>0 to clip out padding
     time_points = (batch[:,-1] != 0)
-    pred_mean = pred_mean[time_points]
+    batch = batch[time_points] 
+    pred_mean = pred_mean[sample, :, :]
+    pred_mean = pred_mean[time_points] # only the time points we want
     if quantile_low is not None and quantile_high is not None:
-            quantile_low  = quantile_low[time_points]
-            quantile_high = quantile_high[time_points]
-    batch = batch[time_points]
+        quantile_low  = quantile_low[sample, :, :]
+        quantile_high = quantile_high[sample, :, :]
+        quantile_low  = quantile_low[time_points]
+        quantile_high = quantile_high[time_points]
+    if ground_truth is not None:
+        ground_truth = ground_truth[sample, :, :]
+        ground_truth = ground_truth[time_points]
+    
+    # the actual values of the time points (time_points is a boolean array)
     x_time = batch[:, -1]
 
-    print(batch.shape)
 
     for feature in range(print_dims):
         ax = fig.add_subplot(dim,1,feature+1)
@@ -402,19 +404,29 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         x_predicted = pred_mean[:, feature]
         x_observed = batch[:,feature].cpu()
         x_mask = batch[:, dim+feature].cpu()
+        # 1) plot prediction
         plt.plot(x_time, x_predicted, alpha=0.7, marker='o', label='predicted', c='C1')
-        # plot line of observed
+        # 2) plot observed
         x = np.array(x_observed)
         x[x_mask==0] = np.nan
-        plt.plot(x_time, x, alpha=0.5, marker='o', label='observed', c='C3') 
-        x_masked = np.array(x_observed)
-        x_masked[x_mask==1] = np.nan
-        plt.scatter(x_time, x_masked, marker='o', alpha=0.5, label='masked', c='C0')
-
+        if ground_truth is None:
+            plt.scatter(x_time, x, alpha=1, marker='o', label='observed', facecolor='None', edgecolor='black')
+        else:
+            plt.plot(x_time, x, alpha=1, marker='o', label='observed', markerfacecolor='None', markeredgecolor='black', color='black')
+        # 3) plot masked: only plot, if ground_truth is not there
+        if ground_truth is None: 
+            # plot masked 
+            x_masked = np.array(x_observed)
+            x_masked[x_mask==1] = np.nan
+            plt.scatter(x_time, x_masked, marker='o', alpha=0.5, label='masked', c='C0')
+        # 4) plot ground truth
+        if ground_truth is not None:
+            plt.plot(x_time, ground_truth[:, feature], alpha=1, c='C3', ls='-', label='ground truth')
+        # 5) plot quantiles (uncertainty)
         if quantile_low is not None and quantile_high is not None:
             ql = quantile_low[:, feature]
-            qh = quantile_high[:, feature]
-            plt.fill_between(x_time, ql, qh, alpha=0.45, facecolor='#65c9f7', interpolate=True)
+            qh = quantile_high[:, feature] 
+            plt.fill_between(x_time, ql, qh, alpha=0.45, facecolor='#65c9f7', interpolate=True, label='uncertainty')
             # plt.vlines(x_time, ql, qh, color='grey', capstyle='round', linewidths=3, alpha=0.3)
         # set labels and limits
         min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.1

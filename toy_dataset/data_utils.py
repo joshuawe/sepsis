@@ -163,7 +163,7 @@ def get_Toy_Dataloader(path, missingness=None, missingness_rate=0.3, missingness
         # create dataset
         dataset = ToyDataset(path, missingness=missingness, missingness_rate=missingness_rate, missingness_value=missingness_value)
 
-        dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle)
+        dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle, prefetch_factor=12, num_workers=3)
 
         return dataloader
 
@@ -572,6 +572,21 @@ class ToyDataDf():
         print(f'Using batch size {batch_size} for training and validation set.')
         
         return train_dataloader, validation_dataloader
+    
+    
+    def get_dataloaders(self, **kwargs):
+        missingness_rate = self.artificial_missingness_rate
+        missingness_value = self.artificial_missingness_value
+        batch_size = kwargs.pop('batch_size', 100)
+        train_dataloader = get_Toy_Dataloader(self.path_train, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
+        validation_dataloader = get_Toy_Dataloader(self.path_validation, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
+        test_dataloader = get_Toy_Dataloader(self.path_test, None, missingness_rate, missingness_value, batch_size=batch_size, **kwargs)
+        ground_truth_dataloader = get_Toy_Dataloader(self.path_validation, None, 0, missingness_value, batch_size=batch_size, **kwargs)
+        
+        print('Note:\tThe ground_truth_dataloader is based on the validation data.')
+        
+        return train_dataloader, validation_dataloader, test_dataloader, ground_truth_dataloader
+        
 
     # def _train_mtan(self, train_dataloader, test_dataloader, log_path='./runs/mTAN', model_args=None, verbose=True):
     #     from toy_dataset.utils_mTAN import MTAN_ToyDataset
@@ -594,7 +609,17 @@ class ToyDataDf():
 
         
 
-def get_complete_batch(dataloader:DataLoader, dataset:ToyDataDf, sample_num:int):
+def get_sample_train_ground_truth(dataloader:DataLoader, dataset:ToyDataDf, sample_num:int):
+    """Get a single sample. The training sample with the corresponding ground truth sample.
+
+    Args:
+        dataloader (DataLoader): Train dataloader.
+        dataset (ToyDataDf): Dataset containing ground truth.
+        sample_num (int): Number of sample, that should be returned.
+
+    Returns:
+        list[torch.Tensor, torch.Tensor]: ground_truth, training_sample
+    """
     import itertools
     # batch from dataloader (e.g. for training)
     batch_size = dataloader.batch_size
@@ -607,8 +632,36 @@ def get_complete_batch(dataloader:DataLoader, dataset:ToyDataDf, sample_num:int)
     X_intact, X, ind_mask, time_pts, id = dataset.get_sample(sample_num)
     ground_truth = X_intact
 
-    return ground_truth, training_sample, X
+    return ground_truth, training_sample
 
+
+def get_batch_train_ground_truth(trainloader:DataLoader, dataset:ToyDataDf, batch_num:int):
+    """Get a single sample. The training sample with the corresponding ground truth sample.
+
+    Args:
+        dataloader (DataLoader): Train dataloader.
+        dataset (ToyDataDf): Dataset containing ground truth.
+        batch_num (int): Number of batch, that should be returned.
+
+    Returns:
+        list[torch.Tensor, torch.Tensor]: ground_truth, training_batch
+    """
+    import itertools
+    # batch from dataloader (e.g. for training)
+    batch_size = trainloader.batch_size
+    training_batch = next(itertools.islice(trainloader, batch_num, None))
+    
+    ground_truth = []
+    # iterate through all nececssary sample numbers, as slices are not yet supported
+    sample_num_min = batch_num * batch_size
+    sample_num_max = sample_num_min + batch_size
+    for sample_num in range(sample_num_min, sample_num_max):
+        X_intact, X, ind_mask, time_pts, id = dataset.get_sample(sample_num)
+        ground_truth.append(X_intact)
+        
+    ground_truth = np.array(ground_truth)
+
+    return ground_truth, training_batch
 
 
 

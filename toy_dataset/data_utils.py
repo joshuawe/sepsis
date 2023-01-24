@@ -266,6 +266,7 @@ class ToyDataDf():
             missingness_value (float, optional): The value the missing datapoints are to be assigned. Defaults to np.nan.
             verbose (bool, optional): Print information to console. Defaults to False.
         """
+        assert (0 <= missingness_rate < 1), f'Missing rate has to be in interval [0,1), instead got {missingness_rate}'
         df = self.df.copy()
         # create missingness in data
         df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
@@ -652,31 +653,21 @@ def get_sample_train_ground_truth(dataloader:DataLoader, dataset:ToyDataDf, samp
     return ground_truth, training_sample
 
 
-def get_batch_train_ground_truth(trainloader:DataLoader, dataset:ToyDataDf, batch_num:int):
+def get_batch_train_ground_truth(trainloader:DataLoader, ground_truth_loader:DataLoader, batch_num:int):
     """Get a single sample. The training sample with the corresponding ground truth sample.
 
     Args:
         dataloader (DataLoader): Train dataloader.
-        dataset (ToyDataDf): Dataset containing ground truth.
+        dataset (DataLoader): Dataset containing ground truth.
         batch_num (int): Number of batch, that should be returned.
 
     Returns:
         list[torch.Tensor, torch.Tensor]: ground_truth, training_batch
     """
     import itertools
-    # batch from dataloader (e.g. for training)
-    batch_size = trainloader.batch_size
+
     training_batch = next(itertools.islice(trainloader, batch_num, None))
-    
-    ground_truth = []
-    # iterate through all nececssary sample numbers, as slices are not yet supported
-    sample_num_min = batch_num * batch_size
-    sample_num_max = sample_num_min + batch_size
-    for sample_num in range(sample_num_min, sample_num_max):
-        X_intact, X, ind_mask, time_pts, id = dataset.get_sample(sample_num)
-        ground_truth.append(X_intact)
-        
-    ground_truth = np.array(ground_truth)
+    ground_truth = next(itertools.islice(ground_truth_loader, batch_num, None))
 
     return ground_truth, training_batch
 

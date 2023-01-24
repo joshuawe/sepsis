@@ -76,11 +76,14 @@ def evaluate_hetvae(
 ):
     torch.manual_seed(seed=0)
     np.random.seed(seed=0)
+    # If there is no ground truth loader, make a list of None values, so iterating is still possible
+    if ground_truth_loader is None:
+        ground_truth_loader = [None] * len(train_loader)
     val_loss, train_n = 0, 0
     avg_loglik, mse, mae = 0, 0, 0
     mean_mae, mean_mse = 0, 0
     with torch.no_grad():
-        for train_batch in train_loader:
+        for train_batch, gt_batch in zip(train_loader, ground_truth_loader):
             train_batch = train_batch.to(device)
             subsampled_mask = subsample_timepoints(
                 train_batch[:, :, dim:2 * dim].clone(),
@@ -108,6 +111,11 @@ def evaluate_hetvae(
             mean_mae += loss_info.mean_mae * num_context_points
             avg_loglik += loss_info.mogloglik * num_context_points
             train_n += num_context_points
+            
+        if gt_batch is not None:
+            pass
+            
+            
     print(
         'nll: {:.4f}, mse: {:.4f}, mae: {:.4f}, '
         'mean_mse: {:.4f}, mean_mae: {:.4f}'.format(
@@ -309,22 +317,26 @@ def get_synthetic_data(
     return data_objects
 
 
-def get_toydata(batch_size):
-    from toy_dataset import data_utils
-
+def get_toydata(missingness_rate=0.2, missingness_value=-1, batch_size=128):
+    from toy_dataset import data_utils    
+    
     name = 'toydataset_50000'
     path = data_utils.datasets_dict[name]
     dataset = data_utils.ToyDataDf(path)
-    dataset.create_mcar_missingness(0.3, -1)
-    model_args = '--niters 2000 --lr 0.0001 --batch-size 128 --rec-hidden 16 --latent-dim 64 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 2000 --dataset toy --seed 0 --norm --sample-tp 0.5 --k-iwae 1'.split()
-    train_dataloader, validation_dataloader = dataset.prepare_mtan(model_args=model_args, batch_size=batch_size)
+    dataset.create_mcar_missingness(missingness_rate, missingness_value)
+    # model_args = '--niters 2000 --lr 0.0001 --batch-size 128 --rec-hidden 16 --latent-dim 64 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 2000 --dataset toy --seed 0 --norm --sample-tp 0.5 --k-iwae 1'.split()
+    # train_dataloader, validation_dataloader = dataset.prepare_mtan(model_args=model_args, batch_size=256)
+    dataloader_dict = dataset.prepare_data_mtan(batch_size=batch_size)
 
     print('Note: Validation and test dataloader are the same!')
 
     data_objects = {
-        "train_dataloader": train_dataloader,
-        "test_dataloader": validation_dataloader,
-        "val_dataloader": validation_dataloader,
+        "train_dataloader": dataloader_dict['train'],
+        "val_dataloader": dataloader_dict['validation'],
+        "test_dataloader": dataloader_dict['validation'],
+        'gt_train_dataloader': dataloader_dict['train_ground_truth'],
+        'gt_val_dataloader': dataloader_dict['validation_ground_truth'],
+        'gt_test_dataloader': None,
         "input_dim": 4,
         "ground_truth": None,
     }
@@ -432,7 +444,7 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.1
         max = np.max((x_predicted.max(), x_observed.max())) + 0.1
         ax.set(xlabel='time', ylabel=f'$X_{feature}$', ylim=(min, max))
-        ax.set_xticks(np.arange(0,50,5), minor=True)
+        ax.set_xticks(np.arange(0,1.1,0.1) * np.round(x_time.max().numpy()), minor=True)
 
         if feature==0:
             plt.legend(loc='lower center', ncol=5)

@@ -85,15 +85,16 @@ def evaluate_hetvae(
     with torch.no_grad():
         for train_batch, gt_batch in zip(train_loader, ground_truth_loader):
             train_batch = train_batch.to(device)
+            # subsampled mask, with same shape as mask in train_batch[:, :, dim:2 * dim], this is for training
             subsampled_mask = subsample_timepoints(
                 train_batch[:, :, dim:2 * dim].clone(),
                 sample_tp,
                 shuffle=shuffle,
             )
+            # reconstruction mask, contains mask for all data not used as input for reference. Instead used for evaluation
             recon_mask = train_batch[:, :, dim:2 * dim] - subsampled_mask
-            context_y = torch.cat((
-                train_batch[:, :, :dim] * subsampled_mask, subsampled_mask
-            ), -1)
+            context_y = torch.cat((train_batch[:, :, :dim] * subsampled_mask, subsampled_mask), -1)
+            target_y = torch.cat((train_batch[:, :, :dim] * recon_mask, recon_mask), -1)
             loss_info = net.compute_unsupervised_loss(
                 train_batch[:, :, -1],
                 context_y,
@@ -456,4 +457,5 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
     fig.suptitle(title + f'Sample {sample}, MSE {mse:.7f}, MAE {mae:.4f}')
     plt.tight_layout()
     fig.subplots_adjust(top=0.975)
-    plt.show()
+    
+    return fig

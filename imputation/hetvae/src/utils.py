@@ -4,7 +4,12 @@ from torch.utils.data import DataLoader
 import numpy as np
 from sklearn import model_selection
 import matplotlib.pyplot as plt
+from copy import deepcopy
 
+# from vae_models import HeTVAE, LossInfo
+import imputation.hetvae.src.vae_models
+
+HeTVAE = imputation.hetvae.src.vae_models.HeTVAE
 
 def union_time(data_loader, classif=False):
     # return all time points of the training data in the data loader, sorted in ascending order.
@@ -65,15 +70,15 @@ def mean_absolute_error(orig, pred, mask):
 
 
 def evaluate_hetvae(
-    net,
-    dim,
-    train_loader,
-    ground_truth_loader = None,
-    sample_tp=0.5,
-    shuffle=False,
-    k_iwae=5,
-    device='cuda',
-):
+        net: HeTVAE,
+        dim: int,
+        train_loader: DataLoader,
+        ground_truth_loader=None,
+        sample_tp=0.5,
+        shuffle: bool=False,
+        k_iwae:int=5,
+        device='cuda',
+    ):
     torch.manual_seed(seed=0)
     np.random.seed(seed=0)
     # If there is no ground truth loader, make a list of None values, so iterating is still possible
@@ -82,52 +87,97 @@ def evaluate_hetvae(
     val_loss, train_n = 0, 0
     avg_loglik, mse, mae = 0, 0, 0
     mean_mae, mean_mse = 0, 0
+    base_loss_dict = {'val_loss': .0, 'train_n': .0, 'avg_loglik': .0, 'mse': .0, 'mae': .0, 'mean_mae': .0, 'mean_mse': .0, 'train_n': 0}
+    # The dict that will contain all losses
+    loss_dict = {
+                'recon': deepcopy(base_loss_dict),
+                'subsampled': deepcopy(base_loss_dict),
+                'gt': deepcopy(base_loss_dict)}
     with torch.no_grad():
         for train_batch, gt_batch in zip(train_loader, ground_truth_loader):
             train_batch = train_batch.to(device)
+            gt_batch = gt_batch.to(device)
             # subsampled mask, with same shape as mask in train_batch[:, :, dim:2 * dim], this is for training
             subsampled_mask = subsample_timepoints(
                 train_batch[:, :, dim:2 * dim].clone(),
                 sample_tp,
                 shuffle=shuffle,
             )
+            # ------- R E C O N S T R U C T I O N ------------
             # reconstruction mask, contains mask for all data not used as input for reference. Instead used for evaluation
+            sub_dict = loss_dict['recon']
             recon_mask = train_batch[:, :, dim:2 * dim] - subsampled_mask
-            context_y = torch.cat((train_batch[:, :, :dim] * subsampled_mask, subsampled_mask), -1)
-            target_y = torch.cat((train_batch[:, :, :dim] * recon_mask, recon_mask), -1)
-            loss_info = net.compute_unsupervised_loss(
-                train_batch[:, :, -1],
-                context_y,
-                train_batch[:, :, -1],
-                torch.cat((
-                    train_batch[:, :, :dim] * recon_mask, recon_mask
-                ), -1),
-                num_samples=k_iwae,
-            )
             num_context_points = recon_mask.sum().item()
-            val_loss += loss_info.composite_loss.item() * num_context_points
-            mse += loss_info.mse * num_context_points
-            mae += loss_info.mae * num_context_points
-            mean_mse += loss_info.mean_mse * num_context_points
-            mean_mae += loss_info.mean_mae * num_context_points
-            avg_loglik += loss_info.mogloglik * num_context_points
-            train_n += num_context_points
+            context_x = train_batch[:, :, -1]
+            context_y = torch.cat((train_batch[:, :, :dim] * subsampled_mask, subsampled_mask), -1)
+            target_x = context_x
+            target_y = torch.cat((train_batch[:, :, :dim] * recon_mask, recon_mask), -1)
+            loss_info = net.compute_unsupervised_loss(context_x, context_y, target_x, target_y, num_samples=k_iwae)
+            sub_dict['val_loss'] += loss_info.composite_loss.item() * num_context_points
+            sub_dict['mse'] += loss_info.mse * num_context_points
+            sub_dict['mae'] += loss_info.mae * num_context_points
+            sub_dict['mean_mse'] += loss_info.mean_mse * num_context_points
+            sub_dict['mean_mae'] += loss_info.mean_mae * num_context_points
+            sub_dict['avg_loglik'] += loss_info.mogloglik * num_context_points
+            sub_dict['train_n'] += num_context_points
             
-        if gt_batch is not None:
-            pass
+            # ------- S U B S A M P L I N G ------------
+            # we have calculated the loss w.r.t. the reconstruction samples
+            # now let us do the same, calc the loss w.r.t. subsampled data
+            sub_dict = loss_dict['subsampled']
+            num_context_points = subsampled_mask.sum().item()
+            target_y = torch.cat((train_batch[:, :, :dim] * subsampled_mask, subsampled_mask), -1)
+            loss_info = net.compute_unsupervised_loss(context_x, context_y, target_x, target_y, num_samples=k_iwae)
+            sub_dict['val_loss'] += loss_info.composite_loss.item() * num_context_points
+            sub_dict['mse'] += loss_info.mse * num_context_points
+            sub_dict['mae'] += loss_info.mae * num_context_points
+            sub_dict['mean_mse'] += loss_info.mean_mse * num_context_points
+            sub_dict['mean_mae'] += loss_info.mean_mae * num_context_points
+            sub_dict['avg_loglik'] += loss_info.mogloglik * num_context_points
+            sub_dict['train_n'] += num_context_points
+            
+            # ------- G R O U N D    T R U T H   ------------
+            # now for the ground truth data
+            # Note: We are not using all of the ground truth data, but only the data, that has not been used  
+            # by the model at all so far. (Neither inference, nor loss calculation)
+            if gt_batch is not None:
+                sub_dict = loss_dict['gt']
+                # first we need to know which data is neither accessed by subsampled or reconstruction data
+                gt_mask = (subsampled_mask==0) * (recon_mask==0)
+                num_context_points = gt_mask.sum().item()
+                target_y = torch.cat((gt_batch[:, :, :dim] * gt_mask, gt_mask), -1)
+                loss_info = net.compute_unsupervised_loss(context_x, context_y, target_x, target_y, num_samples=k_iwae)
+                sub_dict['val_loss'] += loss_info.composite_loss.item() * num_context_points
+                sub_dict['mse'] += loss_info.mse * num_context_points
+                sub_dict['mae'] += loss_info.mae * num_context_points
+                sub_dict['mean_mse'] += loss_info.mean_mse * num_context_points
+                sub_dict['mean_mae'] += loss_info.mean_mae * num_context_points
+                sub_dict['avg_loglik'] += loss_info.mogloglik * num_context_points
+                sub_dict['train_n'] += num_context_points
+                
+                
             
             
-    print(
-        'nll: {:.4f}, mse: {:.4f}, mae: {:.4f}, '
-        'mean_mse: {:.4f}, mean_mae: {:.4f}'.format(
-            - avg_loglik / train_n,
-            mse / train_n,
-            mae / train_n,
-            mean_mse / train_n,
-            mean_mae / train_n,
-        ), flush=True
-    )
-    return ( val_loss/train_n, - avg_loglik/train_n, mse/train_n, mae/train_n, mean_mse/train_n, mean_mae/train_n)
+    # print(
+    #     'nll: {:.4f}, mse: {:.4f}, mae: {:.4f}, '
+    #     'mean_mse: {:.4f}, mean_mae: {:.4f}'.format(
+    #         - avg_loglik / train_n,
+    #         mse / train_n,
+    #         mae / train_n,
+    #         mean_mse / train_n,
+    #         mean_mae / train_n,
+    #     ), flush=True
+    # )
+    
+    for key in loss_dict.keys():
+        sub_dict = loss_dict[key]
+        train_sub = sub_dict['train_n']
+        for k in sub_dict.keys():
+            if k != 'train_n':
+                sub_dict[k] /= train_sub
+
+    # return ( val_loss/train_n, - avg_loglik/train_n, mse/train_n, mae/train_n, mean_mse/train_n, mean_mae/train_n)
+    return loss_dict
 
 
 def get_mimiciii_data(batch_size, test_batch_size=5, filter_anomalies=True):
@@ -344,8 +394,9 @@ def get_toydata(missingness_rate=0.2, missingness_value=-1, batch_size=128):
     return data_objects
 
 
-def subsample_timepoints(mask, percentage_tp_to_sample=None, shuffle=False):
-    # Subsample percentage of points from each time series
+def subsample_timepoints(mask: torch.Tensor, percentage_tp_to_sample=None, shuffle=False):
+    assert(len(mask.shape) == 3), f'Expected 3 dimensional mask, instead got {mask.shape}'
+    # Subsample percentage of time points with at least one variable with information from each sample in batch. Essentially,  time points without any information are ignored during the subsampling process.
     if not shuffle:
         seed = 0
         np.random.seed(seed)
@@ -356,8 +407,11 @@ def subsample_timepoints(mask, percentage_tp_to_sample=None, shuffle=False):
         # take mask for current training sample and sum over all features --
         # figure out which time points don't have any measurements at all in this batch
         current_mask = mask[i].sum(-1).cpu()
+        # time points of current sample, where at least one variable contains information
         non_missing_tp = np.where(current_mask > 0)[0]
+        # number of data-containing timepoints of current sample
         n_tp_current = len(non_missing_tp)
+        # how many of these observed cases should we sample from
         n_to_sample = int(n_tp_current * percentage_tp_to_sample)
         subsampled_idx = sorted(
             np.random.choice(non_missing_tp, n_to_sample, replace=False))
@@ -393,7 +447,7 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
     fig = plt.figure(figsize=(9, 2*dim))
     # only use the required sample from the batches
     batch = batch[sample, :, :]
-    # only use time points, where the t>0 to clip out padding
+    # only use time points, where the t>0 to clip out padding of some time series
     time_points = (batch[:,-1] != 0)
     batch = batch[time_points] 
     pred_mean = pred_mean[sample, :, :]

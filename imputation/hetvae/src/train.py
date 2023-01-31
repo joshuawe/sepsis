@@ -7,6 +7,8 @@ import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
+import PIL, io, torchvision  # for sending images to Tensorboard
+
 
 from random import SystemRandom
 import models
@@ -204,7 +206,7 @@ class HETVAE():
         self.verbose = verbose
         self.parse_flag = False
         self.union_tp = union_tp
-         # parse arguments
+        # parse arguments
         self.parse_arguments(model_args=model_args)
         # create log_path
         start_time = datetime.now().strftime("%Y.%m.%d-%H.%M.%S")
@@ -282,14 +284,25 @@ class HETVAE():
 
     def set_up_tensorboard(self, path:Path):
         self.writer = SummaryWriter(log_dir=path)
+        
+        ['loss', 'train_n', 'avg_loglik', 'mse', 'mae', 'mean_mae', 'mean_mse', 'train_n' ]      
         # with two plots in one
         layout = {"Training vs. Validation": {
-                    "loss": ["Multiline", ["train_loss", "val_loss"]],
-                    "mae": ["Multiline", ["mae_train", "mae_val"]],
-                    "mse": ["Multiline", ["mse_train", "mse_val"]],
-                    "avg_kl": ["Multiline", ["avg_kl_train", "avg_kl_val"]],
-                    "-avg_loglik": ["Multiline", ["-avg_loglik_train", "-avg_loglik_val"]], 
+                    "loss": ["Multiline", ["train_loss", "loss_recon_val"]],
+                    "mae": ["Multiline", ["mae_train", "mae_recon_val"]],
+                    "mse": ["Multiline", ["mse_train", "mse_recon_val"]],
+                    "avg_kl": ["Multiline", ["avg_kl_train", "avg_kl_recon_val"]],
+                    "-avg_loglik": ["Multiline", ["-avg_loglik_train", "-avg_loglik_recon_val"]], 
                     },
+                  'Validation: Subsampled, Recon, Ground Truth': {
+                    'loss': ['Multiline', ['loss_subsample_val', 'loss_recon_val', 'loss_gt_val']],
+                    'mae': ['Multiline', ['mae_subsample_val', 'mae_recon_val', 'mae_gt_val']],
+                    'mse': ['Multiline', ['mse_subsample_val', 'mse_recon_val', 'mse_gt_val']],
+                    'avg_loglik': ['Multiline', ['avg_loglik_subsample_val', 'avg_loglik_recon_val', 'avg_loglik_gt_val']],
+                    'avg_kl': ['Multiline', ['avg_kl_subsample_val', 'avg_kl_recon_val', 'avg_kl_gt_val']],
+                    'mean_mse': ['Multiline', ['mean_mse_subsample_val', 'mean_mse_recon_val', 'mean_mse_gt_val']],
+                    'mean_mae': ['Multiline', ['mean_mae_subsample_val', 'mean_mae_recon_val', 'mean_mae_gt_val']],
+                  }
         }
         self.writer.add_custom_scalars(layout)
         print(f'Tensorboard logging to: {path}')
@@ -322,6 +335,7 @@ class HETVAE():
         start = int(self.epoch)
         end = args.niters if train_extra_epochs==0 else self.epoch+train_extra_epochs
         for itr in range(start, end):
+            self.epoch += 1
             train_loss = 0
             train_n = 0
             avg_loglik, avg_kl, mse, mae = 0, 0, 0, 0
@@ -383,7 +397,6 @@ class HETVAE():
                 mae += loss_info.mae * batch_len
                 train_n += batch_len
 
-            self.epoch += 1
             # log scalars to tensorboard
             writer.add_scalar('train_loss_train', train_loss / train_n, itr)
             writer.add_scalar('-avg_loglik_train', -avg_loglik / train_n, itr)
@@ -414,13 +427,22 @@ class HETVAE():
                 name = 'val'
                 
                 print('   ', name + ':\t', end='')
-                val_loss, m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, val_loader, ground_truth_loader,sample_tp=0.5, shuffle=False, k_iwae=10)
+                # val_loss, m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, val_loader, ground_truth_loader,sample_tp=0.5, shuffle=False, k_iwae=10)
+                loss_dict = utils.evaluate_hetvae(net, self.n_features, val_loader, ground_truth_loader,sample_tp=0.5, shuffle=False, k_iwae=10)
+                # log losses
+                self.log_scalars_dict(loss_dict['subsampled'], itr, '_subsample_val')
+                self.log_scalars_dict(loss_dict['recon'], itr, '_recon_val')
+                self.log_scalars_dict(loss_dict['gt'], itr, '_gt_val')
+                # log imputation image
+                val_batch = next(iter(val_loader))
+                gt_batch = next(iter(ground_truth_loader))
+                self.log_imputed_image_tensorboard(val_batch, gt_batch, 'Imputation', itr)
                 # writer.add_scalar('train_loss' + '_' + name, train_loss / train_n, itr)
-                writer.add_scalar('val_loss', val_loss, itr)
-                writer.add_scalar('-avg_loglik' + '_' + name, m_avg_loglik, itr)
-                writer.add_scalar('avg_kl' + '_' + name, avg_kl / train_n, itr)
-                writer.add_scalar('mse' + '_' + name, mse, itr)
-                writer.add_scalar('mae' + '_' + name, mae, itr)
+                # writer.add_scalar('val_loss', val_loss, itr)
+                # writer.add_scalar('-avg_loglik' + '_' + name, m_avg_loglik, itr)
+                # writer.add_scalar('avg_kl' + '_' + name, avg_kl / train_n, itr)
+                # writer.add_scalar('mse' + '_' + name, mse, itr)
+                # writer.add_scalar('mae' + '_' + name, mae, itr)
             
             # save model every 5 epochs
             if (itr % 5 == 0) or (itr == end-1) and args.save:
@@ -435,9 +457,59 @@ class HETVAE():
                 }, save_path)
         # Free GPU storage, that might remain reserved otherwise
         torch.cuda.empty_cache()
+        
+    
+    def log_scalars_dict(self, log_dict:dict, global_step, tag_suffix=''):
+        """Logs a dictionary to self.writer (Tensorboard), but logs each scalar individually via `add_scalar`.
+
+        Args:
+            log_dict (dict): Key, value pairs for each scalar.
+            global_step (int): The global step or epoch for logging.
+            tag_suffix (str): A suffix to be added to every key while logging (i.e. train, val, test)
+        """
+        for key in log_dict.keys():
+            # Ignore if value is None, (e.g. no gt data)
+            value = log_dict[key]
+            if value is None:
+                continue
+            self.writer.add_scalar(key + tag_suffix, value, global_step)
+            
+        return
+    
+    def log_imputed_image_tensorboard(self, batch:torch.Tensor, gt_batch:torch.Tensor, tag:str, global_step:int):
+        
+        pred_mean, preds, quantile_low, quantile_high = self.impute(batch, 100, sample_tp=1, shuffle=True)
+        fig = utils.visualize_sample(batch, pred_mean, quantile_low, quantile_high, gt_batch, sample=0)
+        
+        # Draw figure on canvas
+        fig.canvas.draw()
+        
+        buf = io.BytesIO()
+        fig.savefig(buf, format='jpeg')
+        buf.seek(0)
+        
+        image = PIL.Image.open(buf)
+        image = torchvision.transforms.ToTensor()(image) #.unsqueeze(0)
+        # image = image.clone().type(torch.uint8)
+        # image = torch.tensor(image, dtype=torch.uint8)
+
+        # # Convert the figure to numpy array, read the pixel values and reshape the array
+        # img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+        # img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+        # # Normalize into 0-1 range for TensorBoard(X). Swap axes for newer versions where API expects colors in first dim
+        # img = img / 255.0
+        # image = np.swapaxes(image, 0, 2) # if your TensorFlow + TensorBoard version are >= 1.8
+
+        # Add figure in numpy "image" to TensorBoard writer
+        self.writer.add_image(tag, image, global_step)
+        
+        return
+        
 
 
-    def impute(self, batch, num_samples, sample_tp=1, shuffle=False):
+    def impute(self, batch, num_samples, sample_tp=1, shuffle=False, quantile=0.68):
+        assert ((num_samples // 2) != 0), f'It should hold: num_samples // 2 != 0, but it does not. Num_samples = {num_samples}'
         dim = self.n_features
         self.net.eval()
         with torch.no_grad():
@@ -469,8 +541,9 @@ class HETVAE():
             pred_mean = preds.mean(0)
             # calc quantiles
             std_quantile = 0.68  # In normal distribution 1*std. dev from mean includes 68% of the set.
-            quantile_high = np.quantile(preds, std_quantile, axis=0)
-            quantile_low  = np.quantile(preds, 1-std_quantile, axis=0)
+            # We want the inner 'quantile' percent
+            quantile_high = np.quantile(preds, (1+quantile)/2, axis=0)
+            quantile_low  = np.quantile(preds, (1-quantile)/2, axis=0)
             # free memory that otherwise stays blocked on GPU
             torch.cuda.empty_cache()
 

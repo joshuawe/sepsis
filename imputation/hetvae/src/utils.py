@@ -9,7 +9,7 @@ from copy import deepcopy
 # from vae_models import HeTVAE, LossInfo
 import imputation.hetvae.src.vae_models
 
-HeTVAE = imputation.hetvae.src.vae_models.HeTVAE
+HeTVAE = imputation.hetvae.src.vae_models.HeTVAE     # The NN implementation
 
 def union_time(data_loader, classif=False):
     # return all time points of the training data in the data loader, sorted in ascending order.
@@ -87,7 +87,7 @@ def evaluate_hetvae(
     val_loss, train_n = 0, 0
     avg_loglik, mse, mae = 0, 0, 0
     mean_mae, mean_mse = 0, 0
-    base_loss_dict = {'val_loss': .0, 'train_n': .0, 'avg_loglik': .0, 'mse': .0, 'mae': .0, 'mean_mae': .0, 'mean_mse': .0, 'train_n': 0}
+    base_loss_dict = {'loss': .0, 'avg_loglik': .0, 'mse': .0, 'mae': .0, 'mean_mae': .0, 'mean_mse': .0, 'train_n': 0}
     # The dict that will contain all losses
     loss_dict = {
                 'recon': deepcopy(base_loss_dict),
@@ -96,7 +96,6 @@ def evaluate_hetvae(
     with torch.no_grad():
         for train_batch, gt_batch in zip(train_loader, ground_truth_loader):
             train_batch = train_batch.to(device)
-            gt_batch = gt_batch.to(device)
             # subsampled mask, with same shape as mask in train_batch[:, :, dim:2 * dim], this is for training
             subsampled_mask = subsample_timepoints(
                 train_batch[:, :, dim:2 * dim].clone(),
@@ -113,7 +112,7 @@ def evaluate_hetvae(
             target_x = context_x
             target_y = torch.cat((train_batch[:, :, :dim] * recon_mask, recon_mask), -1)
             loss_info = net.compute_unsupervised_loss(context_x, context_y, target_x, target_y, num_samples=k_iwae)
-            sub_dict['val_loss'] += loss_info.composite_loss.item() * num_context_points
+            sub_dict['loss'] += loss_info.composite_loss.item() * num_context_points
             sub_dict['mse'] += loss_info.mse * num_context_points
             sub_dict['mae'] += loss_info.mae * num_context_points
             sub_dict['mean_mse'] += loss_info.mean_mse * num_context_points
@@ -128,7 +127,7 @@ def evaluate_hetvae(
             num_context_points = subsampled_mask.sum().item()
             target_y = torch.cat((train_batch[:, :, :dim] * subsampled_mask, subsampled_mask), -1)
             loss_info = net.compute_unsupervised_loss(context_x, context_y, target_x, target_y, num_samples=k_iwae)
-            sub_dict['val_loss'] += loss_info.composite_loss.item() * num_context_points
+            sub_dict['loss'] += loss_info.composite_loss.item() * num_context_points
             sub_dict['mse'] += loss_info.mse * num_context_points
             sub_dict['mae'] += loss_info.mae * num_context_points
             sub_dict['mean_mse'] += loss_info.mean_mse * num_context_points
@@ -141,19 +140,22 @@ def evaluate_hetvae(
             # Note: We are not using all of the ground truth data, but only the data, that has not been used  
             # by the model at all so far. (Neither inference, nor loss calculation)
             if gt_batch is not None:
+                gt_batch = gt_batch.to(device)
                 sub_dict = loss_dict['gt']
                 # first we need to know which data is neither accessed by subsampled or reconstruction data
                 gt_mask = (subsampled_mask==0) * (recon_mask==0)
                 num_context_points = gt_mask.sum().item()
                 target_y = torch.cat((gt_batch[:, :, :dim] * gt_mask, gt_mask), -1)
                 loss_info = net.compute_unsupervised_loss(context_x, context_y, target_x, target_y, num_samples=k_iwae)
-                sub_dict['val_loss'] += loss_info.composite_loss.item() * num_context_points
+                sub_dict['loss'] += loss_info.composite_loss.item() * num_context_points
                 sub_dict['mse'] += loss_info.mse * num_context_points
                 sub_dict['mae'] += loss_info.mae * num_context_points
                 sub_dict['mean_mse'] += loss_info.mean_mse * num_context_points
                 sub_dict['mean_mae'] += loss_info.mean_mae * num_context_points
                 sub_dict['avg_loglik'] += loss_info.mogloglik * num_context_points
                 sub_dict['train_n'] += num_context_points
+            else:
+                loss_dict.pop('gt', None)
                 
                 
             
@@ -171,6 +173,9 @@ def evaluate_hetvae(
     
     for key in loss_dict.keys():
         sub_dict = loss_dict[key]
+        # If sub dict is None, then skip this sub dict (e.g. no ground truth)
+        if sub_dict is None:
+            continue
         train_sub = sub_dict['train_n']
         for k in sub_dict.keys():
             if k != 'train_n':
@@ -178,6 +183,10 @@ def evaluate_hetvae(
 
     # return ( val_loss/train_n, - avg_loglik/train_n, mse/train_n, mae/train_n, mean_mse/train_n, mean_mae/train_n)
     return loss_dict
+
+
+
+        
 
 
 def get_mimiciii_data(batch_size, test_batch_size=5, filter_anomalies=True):

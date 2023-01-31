@@ -718,7 +718,7 @@ def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100,
     return coverages, widths
 
 
-def calculate_pb(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'tuple[np.ndarray, np.ndarray]':
+def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'tuple[np.ndarray, np.ndarray]':
     """Returns the Percent Bias (PB), which stems from the Raw Bias (RB).
     
     Note: This function should be adapted, so that it just takes a dataloader that loads the predictions in some way.

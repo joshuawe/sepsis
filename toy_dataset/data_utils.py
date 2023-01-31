@@ -266,6 +266,7 @@ class ToyDataDf():
             missingness_value (float, optional): The value the missing datapoints are to be assigned. Defaults to np.nan.
             verbose (bool, optional): Print information to console. Defaults to False.
         """
+        assert (0 <= missingness_rate < 1), f'Missing rate has to be in interval [0,1), instead got {missingness_rate}'
         df = self.df.copy()
         # create missingness in data
         df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
@@ -652,31 +653,21 @@ def get_sample_train_ground_truth(dataloader:DataLoader, dataset:ToyDataDf, samp
     return ground_truth, training_sample
 
 
-def get_batch_train_ground_truth(trainloader:DataLoader, dataset:ToyDataDf, batch_num:int):
+def get_batch_train_ground_truth(trainloader:DataLoader, ground_truth_loader:DataLoader, batch_num:int):
     """Get a single sample. The training sample with the corresponding ground truth sample.
 
     Args:
         dataloader (DataLoader): Train dataloader.
-        dataset (ToyDataDf): Dataset containing ground truth.
+        dataset (DataLoader): Dataset containing ground truth.
         batch_num (int): Number of batch, that should be returned.
 
     Returns:
         list[torch.Tensor, torch.Tensor]: ground_truth, training_batch
     """
     import itertools
-    # batch from dataloader (e.g. for training)
-    batch_size = trainloader.batch_size
+
     training_batch = next(itertools.islice(trainloader, batch_num, None))
-    
-    ground_truth = []
-    # iterate through all nececssary sample numbers, as slices are not yet supported
-    sample_num_min = batch_num * batch_size
-    sample_num_max = sample_num_min + batch_size
-    for sample_num in range(sample_num_min, sample_num_max):
-        X_intact, X, ind_mask, time_pts, id = dataset.get_sample(sample_num)
-        ground_truth.append(X_intact)
-        
-    ground_truth = np.array(ground_truth)
+    ground_truth = next(itertools.islice(ground_truth_loader, batch_num, None))
 
     return ground_truth, training_batch
 
@@ -684,6 +675,83 @@ def get_batch_train_ground_truth(trainloader:DataLoader, dataset:ToyDataDf, batc
 
 
 
+def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9, quantile=0.68) -> 'tuple[np.ndarray, np.ndarray]':
+    """Returns the Coverage Ratio (CR) and Average width (AW) between imputed values and the ground truth.
+    
+    Note: This function should be adapted, so that it just takes a dataloader that loads the predictions in some way.
+    
+
+    Args:
+        hetvae (HETVAE): HeTVAE imputation model.
+        dataloader (DataLoader): The train or validation dataloader for imputing values.
+        gt_dataloader (DataLoader): Data loader for same data as in `dataloader`, but contains the ground truth.
+        num_samples (int, optional): Num samples to be drawn during imputation. Defaults to 100.
+        sample_tp (float, optional): Subsampling for HeTVAE during imputation. Defaults to 0.9.
+        quantile (float, optional): The inner quantile of imputed values to be calculated. Defaults to 0.68.
+
+    Returns:
+        np.array, np.array: coverages and widths PER DIMENSION.
+    """
+    dim = hetvae.n_features
+    coverages = list()
+    widths = list()
+    # we iterate through the batches
+    for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
+
+        # get the predictions
+        pred_mean, preds, quantile_low, quantile_high = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp, quantile=quantile)
+        gt = gt_batch[:,:,:dim].numpy()
+        # coverage rate
+        cov = ((quantile_low <= gt) * (gt <= quantile_high)).mean(axis=1) # averaging per sample, remaining samples and features
+        coverages.append(cov)
+        # widths
+        width = np.abs(quantile_high - quantile_low).mean(axis=1)
+        widths.append(width)
+        
+        
+
+    # average over the samples
+    coverages = np.concatenate(coverages).mean(axis=0)
+    widths = np.concatenate(widths).mean(axis=0)
+    
+    
+    return coverages, widths
 
 
+def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'tuple[np.ndarray, np.ndarray]':
+    """Returns the Percent Bias (PB), which stems from the Raw Bias (RB).
+    
+    Note: This function should be adapted, so that it just takes a dataloader that loads the predictions in some way.
 
+    Args:
+        hetvae (HETVAE): Trained HETVAE model.
+        dataloader (DataLoader): Train or Validation loader.
+        gt_dataloader (DataLoader): Same data as dataloader but without missingness.
+        num_samples (int, optional): Number of samples to be drawn by HeTVAE during imputation. Defaults to 100.
+        sample_tp (float, optional): How many points should be subsampled by HetTVAE during imputation process.. Defaults to 0.9.
+
+    Returns:
+        np.array, np.array: Scalar value, representing the raw and percentage bias of the imputation model.
+    """
+    dim = hetvae.n_features
+    percent_bias = list()
+    raw_bias = list()
+    
+    for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
+        # get the predictions
+        pred_mean, preds, quantile_low, quantile_high = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp)
+        gt = gt_batch[:,:,:dim].numpy()
+        # first calc raw bias
+        bias = (pred_mean-gt) 
+        raw_bias.append(bias.mean(axis=(-2,-1)))
+        # calc percent bias
+        bias /= (gt + (gt==0))                     # (gt==0) prevents division by zero
+        bias *= (gt!=0)                            # only consider values, where (gt!=0)
+        bias = bias.mean(axis=(-2,-1))   # averaging for each sample (not per batch, as the last batch could have different length)
+        percent_bias.append(bias)
+        
+    # average over all samples
+    raw_bias = np.concatenate(raw_bias).mean()
+    percent_bias = np.concatenate(percent_bias).mean()
+    
+    return raw_bias, percent_bias

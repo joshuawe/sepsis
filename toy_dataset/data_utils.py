@@ -414,7 +414,7 @@ class ToyDataDf():
     def _base_impute_helper(self):
         pass
 
-    def mse(self, imputed_df:pd.DataFrame):
+    def mse(self, imputed_df:pd.DataFrame, percent=False):
         """Calculates the MSE (mean squared error) between the imputed data in `imputed_df` and the original data in `self.df`.
 
         Args:
@@ -434,7 +434,9 @@ class ToyDataDf():
         assert(X.shape == Y.shape)
         # calculate mse
         mse = (X - Y)**2
-        sum = mse.sum().sum()
+        if percent is True:
+            mse = mse / X
+        # sum = mse.sum().sum()
         # only consider values that had been missing before
         #    Not necessary here, but good practice, as later on it will be necessary.
         mse *= self.ind_mask[:, 2:]
@@ -442,9 +444,42 @@ class ToyDataDf():
         mse /= self.ind_mask[:, 2:].sum().sum()
 
         return mse
+    
+    
+    def mae(self, imputed_df:pd.DataFrame, percent=False):
+        """Calculates the MAE (mean absolute error) between the imputed data in `imputed_df` and the original data in `self.df`.
 
-    def get_mse_impute(self, name, error_dict, impute_func, missingness_rates, repeat_imputation=1):
-        """Calculates the (average) MSE for a given imputation method passes as the argument `impute_func`.
+        Args:
+            imputed_df (pd.DataFrame): Dataset with imputed values.
+
+        Raises:
+            RuntimeError: Only, if no missingness has been created already.
+
+        Returns:
+            float: MAE
+        """
+        if self.artificial_missingness is None:
+            raise RuntimeError('First create missingness.')
+        # get rid of columns: id, time
+        X = self.df.iloc[:, 2:]
+        Y = imputed_df.iloc[:, 2:]
+        assert(X.shape == Y.shape)
+        # calculate mse
+        mae = (X - Y).abs()
+        if percent is True:
+            mae = mae / X
+        # sum = mae.sum().sum()
+        # only consider values that had been missing before
+        #    Not necessary here, but good practice, as later on it will be necessary.
+        mae *= self.ind_mask[:, 2:]
+        mae =  mae.sum().sum()
+        mae /= self.ind_mask[:, 2:].sum().sum()
+
+        return mae
+    
+
+    def get_mse_mae_impute(self, name, error_dict, impute_func, missingness_rates, repeat_imputation=1):
+        """Calculates the (average) MSE and MAE for a given imputation method passes as the argument `impute_func`.
 
         Args:
             name (str): Name of imputation method.
@@ -456,12 +491,13 @@ class ToyDataDf():
         Returns:
             _type_: _description_
         """
-        error = list()
+        error_mse = list()
+        error_mae = list()
         # -> Simple imputation methods <-
         if name in ['mean', 'median', 'LOCF', 'NOCB']:
             # For each missingness_rate
             for m in tqdm(missingness_rates, desc='Missingness rate'):
-                mse = 0
+                mse, mae = 0, 0
                 # Repeat, to average result
                 for r in range(1, repeat_imputation+1):
                     # create missingness
@@ -469,10 +505,13 @@ class ToyDataDf():
                     # impute
                     imputed = impute_func()
                     # add to overall MSE 
-                    mse += self.mse(imputed)
+                    mse += self.mse(imputed, percent=False)
+                    mae += self.mae(imputed, percent=False)
                 # average MSE
                 mse /= repeat_imputation
-                error.append(mse)
+                mae /= repeat_imputation
+                error_mse.append(mse)
+                error_mae.append(mae)
         # -> PyPOTS imputation methods <-
         elif name in ['SAITS', 'BRITS']:
             for m in tqdm(missingness_rates, desc='Missingness rate'):
@@ -483,14 +522,18 @@ class ToyDataDf():
                 imputed, X_intact, X, indicating_mask = impute_func(m)
                 # calculate mse
                 mse = cal_mse(imputed, X_intact, indicating_mask)
-                error.append(mse)
+                mae = cal_mae(imputed, X_intact, indicating_mask)
+                error_mse.append(mse)
+                error_mae.append(mae)
                 # turn on stdout again
                 sys.stdout = out
         else:
             raise RuntimeError(f'Imputation name unknown. Given name: {name}')
         
-        error_dict[name] = error
+        error_dict[name] = {'mse': error_mse, 'mae': error_mae}
         return error_dict
+    
+    
 
 
     def prepare_data_pypots(self, missingness_rate, missingess_value=np.nan):
@@ -549,7 +592,7 @@ class ToyDataDf():
         
         # Model training. This is PyPOTS showtime. 💪
         n_features = X.shape[-1]
-        saits = SAITS(n_steps=50, n_features=4, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=50, patience=30, batch_size=1024)
+        saits = SAITS(n_steps=50, n_features=4, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=20, patience=30, batch_size=1024*6)
         title = self.name + '_SAITS'
         saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.

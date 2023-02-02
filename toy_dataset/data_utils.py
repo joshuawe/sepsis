@@ -270,7 +270,7 @@ class ToyDataDf():
         df = self.df.copy()
         # create missingness in data
         df_intact, df_mis, miss_mask, ind_mask = pc.mcar(df.iloc[:,2:].to_numpy(), missingness_rate, missingness_value)
-        ind_mask = (ind_mask==0) * 1
+        # ind_mask = (ind_mask==0) * 1 # this inverts the ind_mask
         num_values = miss_mask.size
         # add the missingdata back into df
         df.iloc[:,2:] = pd.DataFrame(np.array(df_mis), columns=df.columns[2:])
@@ -549,7 +549,7 @@ class ToyDataDf():
         
         # Model training. This is PyPOTS showtime. 💪
         n_features = X.shape[-1]
-        saits = SAITS(n_steps=50, n_features=5, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=50, patience=30)
+        saits = SAITS(n_steps=50, n_features=4, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=50, patience=30)
         title = self.name + '_SAITS'
         saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.

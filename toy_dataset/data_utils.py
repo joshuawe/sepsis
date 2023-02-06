@@ -477,6 +477,32 @@ class ToyDataDf():
 
         return mae
     
+    def bias(self, imputed_df:pd.DataFrame, percent=False):
+        if self.artificial_missingness is None:
+            raise RuntimeError('First create missingness.')
+        # get rid of columns: id, time  
+        X = self.df.iloc[:, 2:]
+        Y = imputed_df.iloc[:, 2:]
+        assert(X.shape == Y.shape)
+        # calculate mse
+        mae = (X - Y)
+        if percent is True:
+            mae = mae / X
+        # sum = mae.sum().sum()
+        # only consider values that had been missing before
+        #    Not necessary here, but good practice, as later on it will be necessary.
+        mae *= self.ind_mask[:, 2:]
+        mae =  mae.sum().sum()
+        mae /= self.ind_mask[:, 2:].sum().sum()
+        return mae
+    
+    def bias_DL_imputer(self, X, Y, mask):
+        raw_bias = np.absolute(X - Y)
+        raw_bias *= mask
+        raw_bias = raw_bias.sum().sum() / mask.sum().sum()
+        return raw_bias
+        
+    
 
     def get_mse_mae_impute(self, name, error_dict, impute_func, missingness_rates, repeat_imputation=1):
         """Calculates the (average) MSE and MAE for a given imputation method passes as the argument `impute_func`.
@@ -491,13 +517,12 @@ class ToyDataDf():
         Returns:
             _type_: _description_
         """
-        error_mse = list()
-        error_mae = list()
+        error_mse, error_mae, error_raw_bias = list(), list(), list()
         # -> Simple imputation methods <-
         if name in ['mean', 'median', 'LOCF', 'NOCB']:
             # For each missingness_rate
             for m in tqdm(missingness_rates, desc='Missingness rate'):
-                mse, mae = 0, 0
+                mse, mae, raw_bias = 0, 0, 0
                 # Repeat, to average result
                 for r in range(1, repeat_imputation+1):
                     # create missingness
@@ -507,11 +532,14 @@ class ToyDataDf():
                     # add to overall MSE 
                     mse += self.mse(imputed, percent=False)
                     mae += self.mae(imputed, percent=False)
+                    raw_bias += self.bias(imputed, percent=False)
                 # average MSE
                 mse /= repeat_imputation
                 mae /= repeat_imputation
+                raw_bias /= repeat_imputation
                 error_mse.append(mse)
                 error_mae.append(mae)
+                error_raw_bias.append(raw_bias)
         # -> PyPOTS imputation methods <-
         elif name in ['SAITS', 'BRITS']:
             for m in tqdm(missingness_rates, desc='Missingness rate'):
@@ -523,14 +551,16 @@ class ToyDataDf():
                 # calculate mse
                 mse = cal_mse(imputed, X_intact, indicating_mask)
                 mae = cal_mae(imputed, X_intact, indicating_mask)
+                raw_bias = self.bias_DL_imputer(imputed, X_intact, indicating_mask)
                 error_mse.append(mse)
                 error_mae.append(mae)
+                error_raw_bias.append(raw_bias)
                 # turn on stdout again
                 sys.stdout = out
         else:
             raise RuntimeError(f'Imputation name unknown. Given name: {name}')
         
-        error_dict[name] = {'mse': error_mse, 'mae': error_mae}
+        error_dict[name] = {'mse': error_mse, 'mae': error_mae, 'raw_bias': error_raw_bias}
         return error_dict
     
     

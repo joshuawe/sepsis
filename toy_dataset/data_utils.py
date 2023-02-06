@@ -3,6 +3,7 @@
 """
 import os 
 import sys
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 import torch
@@ -803,7 +804,7 @@ def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100,
     for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
 
         # get the predictions
-        pred_mean, preds, quantile_low, quantile_high = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp, quantile=quantile)
+        pred_mean, preds, quantile_low, quantile_high, mask_dict = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp, quantile=quantile)
         gt = gt_batch[:,:,:dim].numpy()
         # coverage rate
         cov = ((quantile_low <= gt) * (gt <= quantile_high)).mean(axis=1) # averaging per sample, remaining samples and features
@@ -822,7 +823,7 @@ def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100,
     return coverages, widths
 
 
-def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'tuple[np.ndarray, np.ndarray]':
+def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'dict[str, dict]':
     """Returns the Percent Bias (PB), which stems from the Raw Bias (RB).
     
     Note: This function should be adapted, so that it just takes a dataloader that loads the predictions in some way.
@@ -835,23 +836,37 @@ def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, 
         sample_tp (float, optional): How many points should be subsampled by HetTVAE during imputation process.. Defaults to 0.9.
 
     Returns:
-        np.array, np.array: Scalar value, representing the raw and percentage bias of the imputation model.
+        dict: Error_dict, where error_dict[data_case][metric_name] is a np.array with error values for each variable.
     """
     dim = hetvae.n_features
-    percent_bias = list()
-    raw_bias = list()
+    base_dict = {'percent_bias': list(), 'raw_bias': list()}
+    error_dict = {'subsample': deepcopy(base_dict), 'recon': deepcopy(base_dict), 'gt': deepcopy(base_dict)}
+    # percent_bias = list()
+    # raw_bias = list()
     
     for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
-        # get the predictions
-        pred_mean, preds, quantile_low, quantile_high = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp)
+        # get the predictions and ground truth
+        pred_mean, preds, quantile_low, quantile_high, mask_dict = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp)
         gt = gt_batch[:,:,:dim].numpy()
-        mask = np.ones(gt.shape)
-        rb, pb = ToyDataDf.calc_bias(gt, pred_mean, mask, keep_vars=True) # one dimensional, as many entries as there are vars
-        raw_bias.append(rb) 
-        percent_bias.append(pb)
-        
-    # average over all samples
-    raw_bias = np.stack(raw_bias, axis=0).mean(axis=0)
-    percent_bias = np.stack(percent_bias, axis=0).mean(axis=0)
+        # iterate over all three data cases 'subsample', 'recon', 'gt'
+        for data_case in error_dict.keys():
+            # get the corresponding mask
+            mask = mask_dict[data_case].cpu().numpy()
+            # calc the rb and pb for this batch
+            rb, pb = ToyDataDf.calc_bias(gt, pred_mean, mask, keep_vars=True) # one dimensional, as many entries as there are vars
+            # add to the previous errors
+            error_dict[data_case]['raw_bias'].append(rb) 
+            error_dict[data_case]['percent_bias'].append(pb)
     
-    return raw_bias, percent_bias
+    
+    # # average over all samples
+    # raw_bias = np.stack(raw_bias, axis=0).mean(axis=0)
+    # percent_bias = np.stack(percent_bias, axis=0).mean(axis=0)
+    
+    # we want mean error per variable, so we iterate through datacase in error_dict
+    for data_case in error_dict.keys():
+        # iterate through all 
+        for metric_name in error_dict[data_case].keys():
+            error_dict[data_case][metric_name] = np.stack(error_dict[data_case][metric_name], axis=0).mean(axis=0)
+    
+    return error_dict

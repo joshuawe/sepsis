@@ -429,13 +429,21 @@ class HETVAE():
                 print('   ', name + ':\t', end='')
                 # val_loss, m_avg_loglik, mse, mae, mean_mse, mean_mae = utils.evaluate_hetvae(net, self.n_features, val_loader, ground_truth_loader,sample_tp=0.5, shuffle=False, k_iwae=10)
                 loss_dict = utils.evaluate_hetvae(net, self.n_features, val_loader, ground_truth_loader,sample_tp=0.5, shuffle=False, k_iwae=10)
-                # log losses
-                self.log_scalars_dict(loss_dict['subsampled'], itr, '_subsample_val')
-                self.log_scalars_dict(loss_dict['recon'], itr, '_recon_val')
-                self.log_scalars_dict(loss_dict['gt'], itr, '_gt_val')
+                # log losses ('subsampled', 'recon', and if available 'gt')
+                for key in loss_dict.keys():
+                    self.log_scalars_dict(loss_dict[key], itr, f'_{key}_val')
+                # self.log_scalars_dict(loss_dict['subsampled'], itr, '_subsample_val')
+                # self.log_scalars_dict(loss_dict['recon'], itr, '_recon_val')
+                # self.log_scalars_dict(loss_dict['gt'], itr, '_gt_val')
                 # log imputation image
+            
+            # Log imputation image only 10 times during training.
+            if (itr % int((end-start)*0.1) == 0) or (itr == 1):
                 val_batch = next(iter(val_loader))
-                gt_batch = next(iter(ground_truth_loader))
+                if ground_truth_loader is not None:
+                    gt_batch = next(iter(ground_truth_loader))
+                else:
+                    gt_batch = None
                 self.log_imputed_image_tensorboard(val_batch, gt_batch, 'Imputation', itr)
                 # writer.add_scalar('train_loss' + '_' + name, train_loss / train_n, itr)
                 # writer.add_scalar('val_loss', val_loss, itr)
@@ -476,7 +484,7 @@ class HETVAE():
             
         return
     
-    def log_imputed_image_tensorboard(self, batch:torch.Tensor, gt_batch:torch.Tensor, tag:str, global_step:int):
+    def log_imputed_image_tensorboard(self, batch:torch.Tensor, gt_batch:"torch.Tensor | None", tag:str, global_step:int):
         
         pred_mean, preds, quantile_low, quantile_high = self.impute(batch, 100, sample_tp=1, shuffle=True)
         fig = utils.visualize_sample(batch, pred_mean, quantile_low, quantile_high, gt_batch, sample=0)

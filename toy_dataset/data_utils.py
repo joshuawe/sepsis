@@ -485,22 +485,42 @@ class ToyDataDf():
         Y = imputed_df.iloc[:, 2:]
         assert(X.shape == Y.shape)
         # calculate mse
-        mae = (X - Y)
+        bias = (Y - X)
         if percent is True:
-            mae = mae / X
+            bias = bias / X
         # sum = mae.sum().sum()
         # only consider values that had been missing before
         #    Not necessary here, but good practice, as later on it will be necessary.
-        mae *= self.ind_mask[:, 2:]
-        mae =  mae.sum().sum()
-        mae /= self.ind_mask[:, 2:].sum().sum()
-        return mae
+        bias *= self.ind_mask[:, 2:]
+        bias =  bias.sum().sum()
+        bias /= self.ind_mask[:, 2:].sum().sum()
+        return bias
     
-    def bias_DL_imputer(self, X, Y, mask):
-        raw_bias = np.absolute(X - Y)
-        raw_bias *= mask
-        raw_bias = raw_bias.sum().sum() / mask.sum().sum()
-        return raw_bias
+    @staticmethod
+    def calc_bias(X, Y, mask, keep_vars=True):
+        """Returns raw bias and percent bias between X and Y.
+
+        Args:
+            X (any): Original values X.
+            Y (any): New or predicted values of X, Y.
+            mask (any): An array indicating, at which locations should be computed. (1=compute, 0=ignore).
+            keep_vars (bool): Whether the average over all variables should be calculated or not. Defaults to False.
+
+        Returns:
+            any, any: raw_bias and percent_bias
+        """
+        assert(type(X) == type(Y) == type(mask)), f'Input of X, Y and mask is not of same type, instead {type(X)}, {type(Y)} and {type(mask)}'
+        raw_bias     = (Y - X)
+        percent_bias = raw_bias / (X + (X==0))   # avoid devision by zero
+        raw_bias     *= mask
+        percent_bias *= mask * (X != 0)
+        if keep_vars is False:
+            axis = None
+        else:
+            axis = tuple(range(raw_bias.ndim-1))
+        percent_bias = percent_bias.sum(axis=axis) / mask.sum(axis=axis)
+        raw_bias     = raw_bias.sum(axis=axis) / mask.sum(axis=axis)
+        return raw_bias, percent_bias
         
     
 
@@ -517,12 +537,13 @@ class ToyDataDf():
         Returns:
             _type_: _description_
         """
-        error_mse, error_mae, error_raw_bias = list(), list(), list()
+        error_mse, error_mae = list(), list()
+        error_raw_bias, error_percent_bias = list(), list()
         # -> Simple imputation methods <-
         if name in ['mean', 'median', 'LOCF', 'NOCB']:
             # For each missingness_rate
             for m in tqdm(missingness_rates, desc='Missingness rate'):
-                mse, mae, raw_bias = 0, 0, 0
+                mse, mae, raw_bias, percent_bias = 0, 0, 0, 0
                 # Repeat, to average result
                 for r in range(1, repeat_imputation+1):
                     # create missingness
@@ -532,14 +553,19 @@ class ToyDataDf():
                     # add to overall MSE 
                     mse += self.mse(imputed, percent=False)
                     mae += self.mae(imputed, percent=False)
-                    raw_bias += self.bias(imputed, percent=False)
+                    rb, pb = self.calc_bias(self.df.iloc[:, 2:], imputed.iloc[:, 2:], self.ind_mask[:, 2:])
+                    raw_bias += rb
+                    percent_bias += pb
+                    
                 # average MSE
                 mse /= repeat_imputation
                 mae /= repeat_imputation
                 raw_bias /= repeat_imputation
+                percent_bias /= repeat_imputation
                 error_mse.append(mse)
                 error_mae.append(mae)
                 error_raw_bias.append(raw_bias)
+                error_percent_bias.append(percent_bias)
         # -> PyPOTS imputation methods <-
         elif name in ['SAITS', 'BRITS']:
             for m in tqdm(missingness_rates, desc='Missingness rate'):
@@ -551,16 +577,21 @@ class ToyDataDf():
                 # calculate mse
                 mse = cal_mse(imputed, X_intact, indicating_mask)
                 mae = cal_mae(imputed, X_intact, indicating_mask)
-                raw_bias = self.bias_DL_imputer(imputed, X_intact, indicating_mask)
+                raw_bias, percent_bias = self.calc_bias(imputed, X_intact, indicating_mask)
                 error_mse.append(mse)
                 error_mae.append(mae)
                 error_raw_bias.append(raw_bias)
+                error_percent_bias.append(percent_bias)
                 # turn on stdout again
                 sys.stdout = out
         else:
             raise RuntimeError(f'Imputation name unknown. Given name: {name}')
         
-        error_dict[name] = {'mse': error_mse, 'mae': error_mae, 'raw_bias': error_raw_bias}
+        # compose error dict holding all errors
+        error_dict[name] = {'mse': error_mse, 'mae': error_mae, 'raw_bias': error_raw_bias, 'percent_bias': error_percent_bias}
+        # convert each list into numpy array
+        for key in error_dict[name].keys():
+            error_dict[name][key] = {'missingness': missingness_rates, 'value':np.array(error_dict[name][key])}
         return error_dict
     
     
@@ -622,7 +653,7 @@ class ToyDataDf():
         
         # Model training. This is PyPOTS showtime. 💪
         n_features = X.shape[-1]
-        saits = SAITS(n_steps=50, n_features=4, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=20, patience=30, batch_size=1024*6)
+        saits = SAITS(n_steps=50, n_features=4, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=20, patience=30, batch_size=1024)
         title = self.name + '_SAITS'
         saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
@@ -814,17 +845,13 @@ def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, 
         # get the predictions
         pred_mean, preds, quantile_low, quantile_high = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp)
         gt = gt_batch[:,:,:dim].numpy()
-        # first calc raw bias
-        bias = (pred_mean-gt) 
-        raw_bias.append(bias.mean(axis=(-2,-1)))
-        # calc percent bias
-        bias /= (gt + (gt==0))                     # (gt==0) prevents division by zero
-        bias *= (gt!=0)                            # only consider values, where (gt!=0)
-        bias = bias.mean(axis=(-2,-1))   # averaging for each sample (not per batch, as the last batch could have different length)
-        percent_bias.append(bias)
+        mask = np.ones(gt.shape)
+        rb, pb = ToyDataDf.calc_bias(gt, pred_mean, mask, keep_vars=True) # one dimensional, as many entries as there are vars
+        raw_bias.append(rb) 
+        percent_bias.append(pb)
         
     # average over all samples
-    raw_bias = np.concatenate(raw_bias).mean()
-    percent_bias = np.concatenate(percent_bias).mean()
+    raw_bias = np.stack(raw_bias, axis=0).mean(axis=0)
+    percent_bias = np.stack(percent_bias, axis=0).mean(axis=0)
     
     return raw_bias, percent_bias

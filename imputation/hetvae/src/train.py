@@ -522,19 +522,21 @@ class HETVAE():
         self.net.eval()
         with torch.no_grad():
             batch = batch.to(self.device)
-            subsampled_mask = utils.subsample_timepoints(
-                batch[:, :, dim:2 * dim].clone(),
-                sample_tp,
-                shuffle=shuffle,
-            )
-            recon_mask = batch[:, :, dim:2 * dim] - subsampled_mask
-            context_y = torch.cat((
-                batch[:, :, :dim] * subsampled_mask, subsampled_mask
-            ), -1)
-
+            # prepare mask
+            subsampled_mask = utils.subsample_timepoints(batch[:, :, dim:2 * dim].clone(), sample_tp, shuffle=shuffle) # mask which is model input
+            recon_mask = batch[:, :, dim:2 * dim] - subsampled_mask # mask which would be used on for model training (loss calculation, reconstruction)
+            gt_mask = (subsampled_mask == 0) * (recon_mask == 0)  # mask containing ground truth, aka the entries that are neither present in subsampled nor recon
+            mask_dict = {'subsample': subsampled_mask, 'recon': recon_mask, 'gt': gt_mask}
+            context_y = torch.cat((batch[:, :, :dim] * subsampled_mask, subsampled_mask), -1)
 
             # from compute_unsupervised_loss
             context_x, context_y, target_x, target_y, num_samples = batch[:, :, -1], context_y, batch[:, :, -1], torch.cat((batch[:, :, :dim] * recon_mask, recon_mask), -1), self.args.k_iwae
+            
+            # target_x = [np.arange(0, 50, 0.3)] * batch.shape[0]
+            # target_x = np.stack(target_x, axis=0)
+            # target_x = torch.from_numpy(target_x).to(batch.device).type_as(batch)
+            # print('target_x.shape:', target_x.shape)
+            # print('batch[:,:,-1].shape:', batch[:,:,-1].shape)
 
             # Get output of decoder: px (and encoder: qz)
             px, qz = self.net.get_reconstruction(context_x, context_y, target_x, num_samples)
@@ -555,4 +557,4 @@ class HETVAE():
             # free memory that otherwise stays blocked on GPU
             torch.cuda.empty_cache()
 
-            return pred_mean, preds, quantile_low, quantile_high
+            return pred_mean, preds, quantile_low, quantile_high, mask_dict

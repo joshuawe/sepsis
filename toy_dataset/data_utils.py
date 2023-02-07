@@ -3,6 +3,7 @@
 """
 import os 
 import sys
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 import torch
@@ -414,7 +415,7 @@ class ToyDataDf():
     def _base_impute_helper(self):
         pass
 
-    def mse(self, imputed_df:pd.DataFrame):
+    def mse(self, imputed_df:pd.DataFrame, percent=False):
         """Calculates the MSE (mean squared error) between the imputed data in `imputed_df` and the original data in `self.df`.
 
         Args:
@@ -434,7 +435,9 @@ class ToyDataDf():
         assert(X.shape == Y.shape)
         # calculate mse
         mse = (X - Y)**2
-        sum = mse.sum().sum()
+        if percent is True:
+            mse = mse / X
+        # sum = mse.sum().sum()
         # only consider values that had been missing before
         #    Not necessary here, but good practice, as later on it will be necessary.
         mse *= self.ind_mask[:, 2:]
@@ -442,9 +445,91 @@ class ToyDataDf():
         mse /= self.ind_mask[:, 2:].sum().sum()
 
         return mse
+    
+    
+    def mae(self, imputed_df:pd.DataFrame, percent=False):
+        """Calculates the MAE (mean absolute error) between the imputed data in `imputed_df` and the original data in `self.df`.
 
-    def get_mse_impute(self, name, error_dict, impute_func, missingness_rates, repeat_imputation=1):
-        """Calculates the (average) MSE for a given imputation method passes as the argument `impute_func`.
+        Args:
+            imputed_df (pd.DataFrame): Dataset with imputed values.
+
+        Raises:
+            RuntimeError: Only, if no missingness has been created already.
+
+        Returns:
+            float: MAE
+        """
+        if self.artificial_missingness is None:
+            raise RuntimeError('First create missingness.')
+        # get rid of columns: id, time
+        X = self.df.iloc[:, 2:]
+        Y = imputed_df.iloc[:, 2:]
+        assert(X.shape == Y.shape)
+        # calculate mse
+        mae = (X - Y).abs()
+        if percent is True:
+            mae = mae / X
+        # sum = mae.sum().sum()
+        # only consider values that had been missing before
+        #    Not necessary here, but good practice, as later on it will be necessary.
+        mae *= self.ind_mask[:, 2:]
+        mae =  mae.sum().sum()
+        mae /= self.ind_mask[:, 2:].sum().sum()
+
+        return mae
+    
+    def bias(self, imputed_df:pd.DataFrame, percent=False):
+        if self.artificial_missingness is None:
+            raise RuntimeError('First create missingness.')
+        # get rid of columns: id, time  
+        X = self.df.iloc[:, 2:]
+        Y = imputed_df.iloc[:, 2:]
+        assert(X.shape == Y.shape)
+        # calculate mse
+        bias = (Y - X)
+        if percent is True:
+            bias = bias / X
+        # sum = mae.sum().sum()
+        # only consider values that had been missing before
+        #    Not necessary here, but good practice, as later on it will be necessary.
+        bias *= self.ind_mask[:, 2:]
+        bias =  bias.sum().sum()
+        bias /= self.ind_mask[:, 2:].sum().sum()
+        return bias
+    
+    @staticmethod
+    def calc_bias(X, Y, mask, keep_vars=True):
+        """Returns raw bias and percent bias between X and Y.
+
+        Args:
+            X (any): Original values X.
+            Y (any): New or predicted values of X, Y.
+            mask (any): An array indicating, at which locations should be computed. (1=compute, 0=ignore).
+            keep_vars (bool): Whether the average over all variables should be calculated or not. Defaults to False.
+
+        Returns:
+            any, any: raw_bias and percent_bias
+        """
+        assert(type(X) == type(Y)), f'Input of X, Y is not of same type, instead {type(X)}, {type(Y)} and mask is {type(mask)}'
+        X, Y, mask = np.array(X), np.array(Y), np.array(mask)
+        raw_bias     = (Y - X)
+        percent_bias = raw_bias / (X + (X==0))   # avoid devision by zero
+        raw_bias     *= mask
+        percent_bias *= mask * (X != 0)
+        if keep_vars is False:
+            axis = None
+        else:
+            axis = tuple(range(raw_bias.ndim-1))
+        no_nans = ~np.isnan(percent_bias)
+        percent_bias = percent_bias.sum(axis=axis, where=no_nans) / mask.sum(axis=axis, where=no_nans)
+        no_nans = ~np.isnan(raw_bias)
+        raw_bias     = raw_bias.sum(axis=axis) / mask.sum(axis=axis, where=no_nans)
+        return raw_bias, percent_bias
+        
+    
+
+    def get_mse_mae_impute(self, name, error_dict, impute_func, missingness_rates, repeat_imputation=1):
+        """Calculates the (average) MSE and MAE for a given imputation method passes as the argument `impute_func`.
 
         Args:
             name (str): Name of imputation method.
@@ -456,12 +541,13 @@ class ToyDataDf():
         Returns:
             _type_: _description_
         """
-        error = list()
+        error_mse, error_mae = list(), list()
+        error_raw_bias, error_percent_bias = list(), list()
         # -> Simple imputation methods <-
         if name in ['mean', 'median', 'LOCF', 'NOCB']:
             # For each missingness_rate
             for m in tqdm(missingness_rates, desc='Missingness rate'):
-                mse = 0
+                mse, mae, raw_bias, percent_bias = 0, 0, 0, 0
                 # Repeat, to average result
                 for r in range(1, repeat_imputation+1):
                     # create missingness
@@ -469,10 +555,21 @@ class ToyDataDf():
                     # impute
                     imputed = impute_func()
                     # add to overall MSE 
-                    mse += self.mse(imputed)
+                    mse += self.mse(imputed, percent=False)
+                    mae += self.mae(imputed, percent=False)
+                    rb, pb = self.calc_bias(self.df.iloc[:, 2:], imputed.iloc[:, 2:], self.ind_mask[:, 2:])
+                    raw_bias += rb
+                    percent_bias += pb
+                    
                 # average MSE
                 mse /= repeat_imputation
-                error.append(mse)
+                mae /= repeat_imputation
+                raw_bias /= repeat_imputation
+                percent_bias /= repeat_imputation
+                error_mse.append(mse)
+                error_mae.append(mae)
+                error_raw_bias.append(raw_bias)
+                error_percent_bias.append(percent_bias)
         # -> PyPOTS imputation methods <-
         elif name in ['SAITS', 'BRITS']:
             for m in tqdm(missingness_rates, desc='Missingness rate'):
@@ -483,14 +580,25 @@ class ToyDataDf():
                 imputed, X_intact, X, indicating_mask = impute_func(m)
                 # calculate mse
                 mse = cal_mse(imputed, X_intact, indicating_mask)
-                error.append(mse)
+                mae = cal_mae(imputed, X_intact, indicating_mask)
+                raw_bias, percent_bias = self.calc_bias(imputed, X_intact, indicating_mask)
+                error_mse.append(mse)
+                error_mae.append(mae)
+                error_raw_bias.append(raw_bias)
+                error_percent_bias.append(percent_bias)
                 # turn on stdout again
                 sys.stdout = out
         else:
             raise RuntimeError(f'Imputation name unknown. Given name: {name}')
         
-        error_dict[name] = error
+        # compose error dict holding all errors
+        error_dict[name] = {'mse': error_mse, 'mae': error_mae, 'raw_bias': error_raw_bias, 'percent_bias': error_percent_bias}
+        # convert each list into numpy array
+        for key in error_dict[name].keys():
+            error_dict[name][key] = {'missingness': missingness_rates, 'value':np.array(error_dict[name][key])}
         return error_dict
+    
+    
 
 
     def prepare_data_pypots(self, missingness_rate, missingess_value=np.nan):
@@ -549,7 +657,7 @@ class ToyDataDf():
         
         # Model training. This is PyPOTS showtime. 💪
         n_features = X.shape[-1]
-        saits = SAITS(n_steps=50, n_features=4, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=50, patience=30, batch_size=1024)
+        saits = SAITS(n_steps=50, n_features=4, n_layers=2, d_model=256, d_inner=128, n_head=4, d_k=64, d_v=64, dropout=0.3, epochs=20, patience=30, batch_size=1024)
         title = self.name + '_SAITS'
         saits.save_logs_to_tensorboard(saving_path=log_path, title=title)
         saits.fit(X)  # train the model. Here I use the whole dataset as the training set, because ground truth is not visible to the model.
@@ -675,7 +783,7 @@ def get_batch_train_ground_truth(trainloader:DataLoader, ground_truth_loader:Dat
 
 
 
-def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9, quantile=0.68) -> 'tuple[np.ndarray, np.ndarray]':
+def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9, quantile=0.68) -> 'dict[str, dict]':
     """Returns the Coverage Ratio (CR) and Average width (AW) between imputed values and the ground truth.
     
     Note: This function should be adapted, so that it just takes a dataloader that loads the predictions in some way.
@@ -693,32 +801,48 @@ def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100,
         np.array, np.array: coverages and widths PER DIMENSION.
     """
     dim = hetvae.n_features
-    coverages = list()
-    widths = list()
+    base_dict = {'coverage_ratio': list(), 'average_width': list()}
+    error_dict = {'subsample': deepcopy(base_dict), 'recon': deepcopy(base_dict), 'gt': deepcopy(base_dict)}
+    # coverages = list()
+    # widths = list()
     # we iterate through the batches
     for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
 
         # get the predictions
-        pred_mean, preds, quantile_low, quantile_high = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp, quantile=quantile)
+        pred_mean, preds, quantile_low, quantile_high, mask_dict = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp, quantile=quantile)
         gt = gt_batch[:,:,:dim].numpy()
-        # coverage rate
-        cov = ((quantile_low <= gt) * (gt <= quantile_high)).mean(axis=1) # averaging per sample, remaining samples and features
-        coverages.append(cov)
-        # widths
-        width = np.abs(quantile_high - quantile_low).mean(axis=1)
-        widths.append(width)
+        
+        # iterate over all three data cases 'subsample', 'recon', 'gt'
+        for data_case in error_dict.keys():
+            # get the corresponding mask
+            mask = mask_dict[data_case].cpu().numpy()
+            gt_masked = gt * mask
+            # coverage rate
+            cov = ((quantile_low <= gt_masked) * (gt_masked <= quantile_high)).mean(axis=1) # averaging per sample, remaining samples and features
+            # widths
+            width = np.abs((quantile_high - quantile_low)*mask).mean(axis=1)
+            # add to the previous values
+            error_dict[data_case]['coverage_ratio'].append(cov) 
+            error_dict[data_case]['average_width'].append(width)
+            
+    # we want mean error per variable, so we iterate through datacase in error_dict
+    for data_case in error_dict.keys():
+        # iterate through all 
+        for metric_name in error_dict[data_case].keys():
+            error_dict[data_case][metric_name] = np.concatenate(error_dict[data_case][metric_name]).mean(axis=0)
+            
         
         
 
-    # average over the samples
-    coverages = np.concatenate(coverages).mean(axis=0)
-    widths = np.concatenate(widths).mean(axis=0)
+    # # average over the samples
+    # coverages = np.concatenate(coverages).mean(axis=0)
+    # widths = np.concatenate(widths).mean(axis=0)
     
     
-    return coverages, widths
+    return error_dict
 
 
-def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'tuple[np.ndarray, np.ndarray]':
+def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'dict[str, dict]':
     """Returns the Percent Bias (PB), which stems from the Raw Bias (RB).
     
     Note: This function should be adapted, so that it just takes a dataloader that loads the predictions in some way.
@@ -731,27 +855,35 @@ def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, 
         sample_tp (float, optional): How many points should be subsampled by HetTVAE during imputation process.. Defaults to 0.9.
 
     Returns:
-        np.array, np.array: Scalar value, representing the raw and percentage bias of the imputation model.
+        dict: Error_dict, where error_dict[data_case][metric_name] is a np.array with error values for each variable.
     """
     dim = hetvae.n_features
-    percent_bias = list()
-    raw_bias = list()
+    base_dict = {'percent_bias': list(), 'raw_bias': list()}
+    error_dict = {'subsample': deepcopy(base_dict), 'recon': deepcopy(base_dict), 'gt': deepcopy(base_dict)}
     
     for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
-        # get the predictions
-        pred_mean, preds, quantile_low, quantile_high = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp)
+        # get the predictions and ground truth
+        pred_mean, preds, quantile_low, quantile_high, mask_dict = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp)
         gt = gt_batch[:,:,:dim].numpy()
-        # first calc raw bias
-        bias = (pred_mean-gt) 
-        raw_bias.append(bias.mean(axis=(-2,-1)))
-        # calc percent bias
-        bias /= (gt + (gt==0))                     # (gt==0) prevents division by zero
-        bias *= (gt!=0)                            # only consider values, where (gt!=0)
-        bias = bias.mean(axis=(-2,-1))   # averaging for each sample (not per batch, as the last batch could have different length)
-        percent_bias.append(bias)
-        
-    # average over all samples
-    raw_bias = np.concatenate(raw_bias).mean()
-    percent_bias = np.concatenate(percent_bias).mean()
+        # iterate over all three data cases 'subsample', 'recon', 'gt'
+        for data_case in error_dict.keys():
+            # get the corresponding mask
+            mask = mask_dict[data_case].cpu().numpy()
+            # calc the rb and pb for this batch
+            rb, pb = ToyDataDf.calc_bias(gt, pred_mean, mask, keep_vars=True) # one dimensional, as many entries as there are vars
+            # add to the previous values
+            error_dict[data_case]['raw_bias'].append(rb) 
+            error_dict[data_case]['percent_bias'].append(pb)
     
-    return raw_bias, percent_bias
+    
+    # # average over all samples
+    # raw_bias = np.stack(raw_bias, axis=0).mean(axis=0)
+    # percent_bias = np.stack(percent_bias, axis=0).mean(axis=0)
+    
+    # we want mean error per variable, so we iterate through datacase in error_dict
+    for data_case in error_dict.keys():
+        # iterate through all 
+        for metric_name in error_dict[data_case].keys():
+            error_dict[data_case][metric_name] = np.stack(error_dict[data_case][metric_name], axis=0).mean(axis=0)
+    
+    return error_dict

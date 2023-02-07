@@ -510,7 +510,8 @@ class ToyDataDf():
         Returns:
             any, any: raw_bias and percent_bias
         """
-        assert(type(X) == type(Y) == type(mask)), f'Input of X, Y and mask is not of same type, instead {type(X)}, {type(Y)} and {type(mask)}'
+        assert(type(X) == type(Y)), f'Input of X, Y is not of same type, instead {type(X)}, {type(Y)} and mask is {type(mask)}'
+        X, Y, mask = np.array(X), np.array(Y), np.array(mask)
         raw_bias     = (Y - X)
         percent_bias = raw_bias / (X + (X==0))   # avoid devision by zero
         raw_bias     *= mask
@@ -519,8 +520,10 @@ class ToyDataDf():
             axis = None
         else:
             axis = tuple(range(raw_bias.ndim-1))
-        percent_bias = percent_bias.sum(axis=axis) / mask.sum(axis=axis)
-        raw_bias     = raw_bias.sum(axis=axis) / mask.sum(axis=axis)
+        no_nans = ~np.isnan(percent_bias)
+        percent_bias = percent_bias.sum(axis=axis, where=no_nans) / mask.sum(axis=axis, where=no_nans)
+        no_nans = ~np.isnan(raw_bias)
+        raw_bias     = raw_bias.sum(axis=axis) / mask.sum(axis=axis, where=no_nans)
         return raw_bias, percent_bias
         
     
@@ -780,7 +783,7 @@ def get_batch_train_ground_truth(trainloader:DataLoader, ground_truth_loader:Dat
 
 
 
-def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9, quantile=0.68) -> 'tuple[np.ndarray, np.ndarray]':
+def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9, quantile=0.68) -> 'dict[str, dict]':
     """Returns the Coverage Ratio (CR) and Average width (AW) between imputed values and the ground truth.
     
     Note: This function should be adapted, so that it just takes a dataloader that loads the predictions in some way.
@@ -798,29 +801,45 @@ def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100,
         np.array, np.array: coverages and widths PER DIMENSION.
     """
     dim = hetvae.n_features
-    coverages = list()
-    widths = list()
+    base_dict = {'coverage_ratio': list(), 'average_width': list()}
+    error_dict = {'subsample': deepcopy(base_dict), 'recon': deepcopy(base_dict), 'gt': deepcopy(base_dict)}
+    # coverages = list()
+    # widths = list()
     # we iterate through the batches
     for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
 
         # get the predictions
         pred_mean, preds, quantile_low, quantile_high, mask_dict = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp, quantile=quantile)
         gt = gt_batch[:,:,:dim].numpy()
-        # coverage rate
-        cov = ((quantile_low <= gt) * (gt <= quantile_high)).mean(axis=1) # averaging per sample, remaining samples and features
-        coverages.append(cov)
-        # widths
-        width = np.abs(quantile_high - quantile_low).mean(axis=1)
-        widths.append(width)
+        
+        # iterate over all three data cases 'subsample', 'recon', 'gt'
+        for data_case in error_dict.keys():
+            # get the corresponding mask
+            mask = mask_dict[data_case].cpu().numpy()
+            gt_masked = gt * mask
+            # coverage rate
+            cov = ((quantile_low <= gt_masked) * (gt_masked <= quantile_high)).mean(axis=1) # averaging per sample, remaining samples and features
+            # widths
+            width = np.abs((quantile_high - quantile_low)*mask).mean(axis=1)
+            # add to the previous values
+            error_dict[data_case]['coverage_ratio'].append(cov) 
+            error_dict[data_case]['average_width'].append(width)
+            
+    # we want mean error per variable, so we iterate through datacase in error_dict
+    for data_case in error_dict.keys():
+        # iterate through all 
+        for metric_name in error_dict[data_case].keys():
+            error_dict[data_case][metric_name] = np.concatenate(error_dict[data_case][metric_name]).mean(axis=0)
+            
         
         
 
-    # average over the samples
-    coverages = np.concatenate(coverages).mean(axis=0)
-    widths = np.concatenate(widths).mean(axis=0)
+    # # average over the samples
+    # coverages = np.concatenate(coverages).mean(axis=0)
+    # widths = np.concatenate(widths).mean(axis=0)
     
     
-    return coverages, widths
+    return error_dict
 
 
 def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, sample_tp=0.9) -> 'dict[str, dict]':
@@ -841,8 +860,6 @@ def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, 
     dim = hetvae.n_features
     base_dict = {'percent_bias': list(), 'raw_bias': list()}
     error_dict = {'subsample': deepcopy(base_dict), 'recon': deepcopy(base_dict), 'gt': deepcopy(base_dict)}
-    # percent_bias = list()
-    # raw_bias = list()
     
     for train_batch, gt_batch in tqdm(zip(dataloader, gt_dataloader), total=len(dataloader)):
         # get the predictions and ground truth
@@ -854,7 +871,7 @@ def calculate_bias(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100, 
             mask = mask_dict[data_case].cpu().numpy()
             # calc the rb and pb for this batch
             rb, pb = ToyDataDf.calc_bias(gt, pred_mean, mask, keep_vars=True) # one dimensional, as many entries as there are vars
-            # add to the previous errors
+            # add to the previous values
             error_dict[data_case]['raw_bias'].append(rb) 
             error_dict[data_case]['percent_bias'].append(pb)
     

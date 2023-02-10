@@ -532,6 +532,13 @@ class HETVAE():
             # from compute_unsupervised_loss
             context_x, context_y, target_x, target_y, num_samples = batch[:, :, -1], context_y, batch[:, :, -1], torch.cat((batch[:, :, :dim] * recon_mask, recon_mask), -1), self.args.k_iwae
             
+            context_x = batch[:, :, -1]   # input time points
+            context_y = context_y         # input data
+            target_x = batch[:, :, -1]    # output time points
+            target_y = torch.cat((batch[:, :, :dim] * recon_mask, recon_mask), -1)   # expected output (no needed for imputation)
+            num_samples = self.args.k_iwae
+
+            
             # target_x = [np.arange(0, 50, 0.3)] * batch.shape[0]
             # target_x = np.stack(target_x, axis=0)
             # target_x = torch.from_numpy(target_x).to(batch.device).type_as(batch)

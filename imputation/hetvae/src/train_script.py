@@ -14,8 +14,10 @@ import utils
 from imputation.hetvae.src.train import HETVAE
 from toy_dataset import data_utils
 
-dataset = 'physionet'
-batch_size = 100
+dataset = 'toy-josh'
+
+batch_size_dict = {'physionet': 100, 'toy-josh': 512}
+batch_size = batch_size_dict[dataset]
 
 if dataset == 'toy':
     # data_obj = utils.get_synthetic_data(args)
@@ -68,14 +70,14 @@ def train_a_hetvae(model_args):
 """ ################################################################################################ """
 
 
-model_args = f'--niters 200 --lr 0.0001 --batch-size 128 --rec-hidden 128 --latent-dim 128 --width 128 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 8000 --dataset {dataset} --seed 1 --save --norm --intensity --net hetvae --bound-variance --shuffle  --sample-tp 0.5 --elbo-weight 1.0 --mse-weight 5 --mixing concat --k-iwae 10'
-train_a_hetvae(model_args)
+# model_args = f'--niters 20 --lr 0.00005 --batch-size 128 --rec-hidden 128 --latent-dim 128 --width 128 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 8000 --dataset {dataset} --seed 15 --save --norm --intensity --net hetvae --bound-variance --shuffle  --sample-tp 0.3 --elbo-weight 1.0 --mse-weight 5.0 --mixing concat --k-iwae 10'
+# train_a_hetvae(model_args)
 
 
 
-# for i in np.arange(0,20, 1):
-#     model_args = f'--niters 20 --lr 0.0001 --batch-size 128 --rec-hidden 128 --latent-dim 128 --width 128 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 8000 --dataset {dataset} --seed 1 --save --norm --intensity --net hetvae --bound-variance --shuffle  --sample-tp 0.5 --elbo-weight 1.0 --mse-weight {i} --mixing concat --k-iwae 10'
-#     train_a_hetvae(model_args)
+for i in [0.1, 0.3, 0.9]:
+    model_args = f'--niters 200 --lr 0.00005 --batch-size 128 --rec-hidden 128 --latent-dim 128 --width 128 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 8000 --dataset {dataset} --seed 15 --save --norm --intensity --net hetvae --bound-variance --shuffle  --sample-tp {i} --elbo-weight 1.0 --mse-weight 5.0 --mixing concat --k-iwae 10'
+    train_a_hetvae(model_args)
     
 # for i in np.arange(20,200, 10):
 #     model_args = f'--niters 20 --lr 0.0001 --batch-size 128 --rec-hidden 128 --latent-dim 128 --width 128 --embed-time 128 --enc-num-heads 1 --num-ref-points 16 --n 8000 --dataset {dataset} --seed 1 --save --norm --intensity --net hetvae --bound-variance --shuffle  --sample-tp 0.5 --elbo-weight 1.0 --mse-weight {i} --mixing concat --k-iwae 10'

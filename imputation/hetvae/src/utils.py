@@ -430,7 +430,7 @@ def subsample_timepoints(mask: torch.Tensor, percentage_tp_to_sample=None, shuff
     return mask
 
 
-def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, ground_truth=None, print_dims=None, sample=None, title=''):
+def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, ground_truth=None, mask_dict: 'None|dict[str,torch.Tensor]'=None, print_dims=None, sample=None, title=''):
     """*(Author: Josh)* Visualizing a sample with matplotlib. It will display max 4 features in a 2x2 figure grid. If `sample is None`, a random sample will be drawn from the batch.
 
     Args:
@@ -443,6 +443,7 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         sample (int, optional): The sample to be displayed from batch. Defaults to None.
         title (str, optional): Beginning of figure title. Defaults to ''.
     """
+    assert(mask_dict is not None), f'mask_dict was None, but should be a dict with arrays'
     # get num features from batch shape
     dim = (batch.shape[-1] - 1) / 2
     assert(dim % 1 == 0), f'dim should be an integer, instead dim = {dim}'
@@ -455,20 +456,40 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         
     fig = plt.figure(figsize=(9, 2*dim))
     # only use the required sample from the batches
-    batch = batch[sample, :, :]
-    # only use time points, where the t>0 to clip out padding of some time series
-    time_points = (batch[:,-1] != 0)
-    batch = batch[time_points] 
-    pred_mean = pred_mean[sample, :, :]
-    pred_mean = pred_mean[time_points] # only the time points we want
-    if quantile_low is not None and quantile_high is not None:
-        quantile_low  = quantile_low[sample, :, :]
-        quantile_high = quantile_high[sample, :, :]
-        quantile_low  = quantile_low[time_points]
-        quantile_high = quantile_high[time_points]
-    if ground_truth is not None:
-        ground_truth = ground_truth[sample, :, :]
-        ground_truth = ground_truth[time_points]
+    # batch = batch[sample, :, :]
+    # # only use time points, where the t>0 to clip out padding of some time series
+    # time_points = (batch[:,-1] != 0)
+    # batch = batch[time_points] 
+    # pred_mean = pred_mean[sample, :, :]
+    # pred_mean = pred_mean[time_points] # only the time points we want
+    # if quantile_low is not None and quantile_high is not None:
+    #     quantile_low  = quantile_low[sample, :, :]
+    #     quantile_high = quantile_high[sample, :, :]
+    #     quantile_low  = quantile_low[time_points]
+    #     quantile_high = quantile_high[time_points]
+    # if ground_truth is not None:
+    #     ground_truth = ground_truth[sample, :, :]
+    #     ground_truth = ground_truth[time_points]
+    
+    mask_subsample = mask_dict['subsample'].cpu().numpy()
+    mask_recon = mask_dict['recon'].cpu().numpy()
+    mask_gt = mask_dict['gt'].cpu().numpy()
+        
+    time_points = (batch[sample, :, -1] != 0)
+    var_list = [batch, pred_mean, quantile_low, quantile_high, ground_truth, mask_subsample, mask_recon, mask_gt]
+    for i, var in enumerate(var_list):
+        if var is not None:
+            var_list[i] = var[sample, :, :][time_points]  # get the sample and only the time opints we want
+            
+    batch, pred_mean, quantile_low, quantile_high, ground_truth, mask_subsample, mask_recon, mask_gt = var_list
+            
+    assert((pred_mean == var_list[1]).all())
+    assert((mask_subsample + mask_recon + mask_gt == 1).all())
+    assert((mask_subsample*mask_recon==0).all())
+    assert((batch[:,:4][(mask_subsample==0)*(mask_recon==0)]== -1).all()) # all values where mask_sub and mask_recon are zero should be -1
+    # assert(())
+    
+            
     
     # the actual values of the time points (time_points is a boolean array)
     x_time = batch[:, -1]
@@ -478,47 +499,78 @@ def visualize_sample(batch, pred_mean, quantile_low=None, quantile_high=None, gr
         ax = fig.add_subplot(dim,1,feature+1)
         # x_predicted = pred_mean[0, sample, :, feature]
         x_predicted = pred_mean[:, feature]
-        x_observed = batch[:,feature].cpu()
-        x_mask = batch[:, dim+feature].cpu()
+        x_observed = batch[:,feature].cpu().numpy()
+        # x_mask = batch[:, dim+feature].cpu()
         # 1) plot prediction
-        plt.plot(x_time, x_predicted, alpha=0.7, marker='o', label='predicted', c='C1')
-        # 2) plot observed
+        plt.plot(x_time, x_predicted, alpha=1, marker='o', label='predicted', c='C0')
+        # 2) plot input
         x = np.array(x_observed)
-        x[x_mask==0] = np.nan
+        x[mask_subsample[:,feature]==1] = np.nan
         if ground_truth is None:
-            plt.scatter(x_time, x, alpha=1, marker='o', label='observed', facecolor='None', edgecolor='black')
+            plt.plot(x_time, x, alpha=1, marker='o', label='input', markerfacecolor='black', markeredgecolor='black', color='black')
         else:
-            plt.plot(x_time, x, alpha=1, marker='o', label='observed', markerfacecolor='None', markeredgecolor='black', color='black')
+            plt.scatter(x_time, x, alpha=1, marker='x', label='input', facecolor='black', edgecolor='black')
+        # 2b) plot eval
+        x = x_observed
+        x[mask_recon[:,feature] == 1] = np.nan
+        plt.scatter(x_time, x, alpha=1, marker='d', label='eval', facecolor='None', edgecolor='black')
         # 3) plot masked: only plot, if ground_truth is not there
         if ground_truth is None: 
+            print('Error in implementation.')
             # plot masked 
             x_masked = np.array(x_observed)
             x_masked[x_mask==1] = np.nan
-            plt.scatter(x_time, x_masked, marker='o', alpha=0.5, label='masked', c='C0')
+            plt.scatter(x_time, x_masked, marker='o', alpha=0.5, label='masked', c='C1')
         # 4) plot ground truth
         if ground_truth is not None:
-            plt.plot(x_time, ground_truth[:, feature], alpha=1, c='C3', ls='-', label='ground truth')
+            x = ground_truth[:,feature]
+            x[mask_gt[:,feature]==1] = np.nan
+            plt.plot(x_time, x, alpha=1, c='C3', ls='-', label='ground truth')
         # 5) plot quantiles (uncertainty)
         if quantile_low is not None and quantile_high is not None:
             ql = quantile_low[:, feature]
             qh = quantile_high[:, feature] 
             plt.fill_between(x_time, ql, qh, alpha=0.45, facecolor='#65c9f7', interpolate=True, label='uncertainty')
             # plt.vlines(x_time, ql, qh, color='grey', capstyle='round', linewidths=3, alpha=0.3)
+            
+        # tests
+        d = np.arange(0, len(x_time), 1) 
+        dd = d[mask_subsample[:,feature] == 1]
+        plt.scatter(dd, np.zeros(dd.shape), marker='x')
+        dd = d[mask_recon[:,feature] == 1]
+        plt.scatter(dd, np.zeros(dd.shape), marker='d')
+        dd = d[mask_gt[:,feature] == 1]
+        plt.scatter(dd, np.zeros(dd.shape), marker='*')
+        
+        
+
+        
         # set labels and limits
-        min = np.min((x_predicted.min(), x_observed[x_observed>-1].min())) - 0.1
-        max = np.max((x_predicted.max(), x_observed.max())) + 0.1
-        ax.set(xlabel='time', ylabel=f'$X_{feature}$', ylim=(min, max))
-        ax.set_xticks(np.arange(0,1.1,0.1) * np.round(x_time.max().numpy()), minor=True)
+        min = np.min((x_predicted.min(), np.nanmin(x_observed[x_observed>-1]))) * 0.9
+        max = np.max((x_predicted.max(), np.nanmax(x_observed))) * 1.1
+        min -= (max - min) * 0.1
+        max += (max - min) * 0.1 
+        ax.set_xticks(np.arange(0,1.1,0.1) * 50, minor=True, alpha=0)
+        # ax.set_yticks(sorted(list(ax.get_yticks()) + [min, max]))
+        ax.set_yticks([min, max], minor=True)
+        ax.set(ylabel=f'$X_{feature}$', ylim=(min, max))
+        ax.tick_params(axis='x', which='both', colors='#b3b3b3', length=0)
+        
+        ax.vlines(np.arange(0,1.1,0.1)*50, ax.get_ylim()[0], ax.get_ylim()[1], color='#d9d9d9', zorder=0)
+        ax.set_facecolor('#f4f4f4')
+        ax.spines['top'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
-        if feature==0:
-            plt.legend(loc='lower center', ncol=5)
-
-
+    ax.set(xlabel='time')
     mse = mean_squared_error(batch[:,:dim], pred_mean[:,:], batch[:, dim:2*dim])
     mae = mean_absolute_error(batch[:,:dim], pred_mean[:,:], batch[:, dim:2*dim])
-    plt.legend(loc='lower center', ncol=5)
+    plt.legend(bbox_to_anchor=(0.5, 0), loc="lower center",
+                bbox_transform=fig.transFigure, ncol=5) # put the lower center point of legend on the lower center point of figure coordinates
+
     fig.suptitle(title + f'Sample {sample}, MSE {mse:.7f}, MAE {mae:.4f}')
+    
     plt.tight_layout()
-    fig.subplots_adjust(top=0.975)
+    # fig.subplots_adjust(top=0.975)
     
     return fig

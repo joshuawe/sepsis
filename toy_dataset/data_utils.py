@@ -812,6 +812,13 @@ def calculate_cr_aw(hetvae:'HETVAE', dataloader, gt_dataloader, num_samples=100,
         pred_mean, preds, quantile_low, quantile_high, mask_dict = hetvae.impute(train_batch, num_samples, sample_tp=sample_tp, quantile=quantile)
         gt = gt_batch[:,:,:dim].numpy()
         
+        # sanity check that all masks are correct
+        mask_sub = mask_dict['subsample']
+        mask_recon = mask_dict['recon']
+        mask_gt = mask_dict['gt']
+        assert(((mask_sub+mask_recon+mask_gt) == 1).all()), 'There were values above 1, when adding.'
+        assert(((mask_sub*mask_recon*mask_gt)==0).all()), 'There were values != 0, when multiplying'
+        
         # iterate over all three data cases 'subsample', 'recon', 'gt'
         for data_case in error_dict.keys():
             # get the corresponding mask

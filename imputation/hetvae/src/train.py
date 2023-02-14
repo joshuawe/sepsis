@@ -387,7 +387,7 @@ class HETVAE():
                     num_samples=args.k_iwae,
                     beta=kl_coef,
                 )
-                self.optimizer.zero_grad()
+                self.optimizer.zero_grad(set_to_none=True)
                 loss_info.composite_loss.backward()
                 self.optimizer.step()
                 train_loss += loss_info.composite_loss.item() * batch_len
@@ -529,14 +529,12 @@ class HETVAE():
             mask_dict = {'subsample': subsampled_mask, 'recon': recon_mask, 'gt': gt_mask}
             context_y = torch.cat((batch[:, :, :dim] * subsampled_mask, subsampled_mask), -1)
 
-            # from compute_unsupervised_loss
-            context_x, context_y, target_x, target_y, num_samples = batch[:, :, -1], context_y, batch[:, :, -1], torch.cat((batch[:, :, :dim] * recon_mask, recon_mask), -1), self.args.k_iwae
-            
+            # from compute_unsupervised_loss            
             context_x = batch[:, :, -1]   # input time points
             context_y = context_y         # input data
             target_x = batch[:, :, -1]    # output time points
             target_y = torch.cat((batch[:, :, :dim] * recon_mask, recon_mask), -1)   # expected output (no needed for imputation)
-            num_samples = self.args.k_iwae
+            num_samples = num_samples
 
             
             # target_x = [np.arange(0, 50, 0.3)] * batch.shape[0]

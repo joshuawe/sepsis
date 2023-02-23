@@ -49,32 +49,41 @@ def sort_by_task_t(task_tensor, t_tensor, x_tensor):
     
     return task_tensor_sorted, t_tensor_sorted, x_tensor_sorted
 
+
 class MGPImputer(pl.LightningModule):
-    def __init__(self, pars=None) -> None:
-        super().__init__()
+    def __init__(self, **pars) -> None:
+        super(MGPImputer, self).__init__()
 
-        # self.pars = pars
-        # self.data_ready = False
+        # for the convenicne of loading params and models from checkpoint
+        self.save_hyperparameters()
 
-        # Model parts
-        # num_tasks = len(pars['dyn_vars'])
-        self.data_mode = "simulation"
-        self.mae_loss = torch.nn.L1Loss()
+        self.data_mode = self.hparams.data_mode
+
         # for plotting figures
-        self.task_names = ['Noise', 'Trend', "Seasonality", "Trend + Seasonality"]
-        self.num_tasks = 4
-        # TODO: perhaps shouldn't be a fixed value, and should be varied during training
+        self.task_names = self.hparams.task_names
+        self.num_tasks = self.hparams.num_tasks
+        self.num_kernels = self.hparams.num_kernels
+        self.rank = self.hparams.rank
+
         # pick the eval that works best at a fixed sample_tp (as prior knowledge of missing-rate for the dataset)
-        self.sample_tp = 0.4
+        self.sample_tp = self.hparams.sample_tp
         # randomly pick a missing rate in the interval for model's robustness
-        self.sample_tp_interval = [0.1, 0.8]
+        self.sample_tp_interval = self.hparams.sample_tp_interval
+
+        self.dataset_name = self.hparams.dataset_name
+        self.data_missingness = self.hparams.data_missingness
+        self.batch_size = self.hparams.batch_size
+        self.lr = self.hparams.lr
+
+        self.mae_loss = torch.nn.L1Loss()
+
         self.mgp = HadamardGP(
             train_inputs = None,
             train_targets = None,
-            likelihood=HadamardGaussianLikelihood(num_tasks=4),
-            num_tasks=4,
-            num_kernels=10,
-            rank=4
+            likelihood=HadamardGaussianLikelihood(num_tasks=self.num_tasks),
+            num_tasks=self.num_tasks,
+            num_kernels=self.num_kernels,
+            rank=self.rank
         )
         self.mll = ExactMarginalLogLikelihood(self.mgp.likelihood, self.mgp)
 
@@ -95,70 +104,25 @@ class MGPImputer(pl.LightningModule):
         mse_loss_gt = 0
 
         num_seq = 0
-        if self.data_mode == "simulation":
-            batch, gt_batch = batch
-            masks, values, t = mask_collate(batch)
+
+        masks, values, t = mask_collate(batch)
+        if self.data_mode == "simulation" and self.train_mode:
+
+            # re-initialize as a iterator by the end of epoch
+            gt_batch = next(self.gt_train_loader_iter)
             _, gt_values, _ = mask_collate(gt_batch)
 
-        else:
-            masks, values, t = mask_collate(batch)
+        if self.data_mode == "simulation" and not self.train_mode:
+            gt_batch = next(self.gt_validation_loader_iter)
+            _, gt_values, _ = mask_collate(gt_batch)
+
         for mask, value in zip(masks, values):  # Static features and sepsis label not needed
-            # non-vectorized version
-            # go over each task within each sequence
-            # tasks_context = []
-            # ts_context = []
-            # xs_context = []
-            #
-            # tasks_target = []
-            # ts_target = []
-            # xs_target = []
-            # for i in range(4):
-            #     value_i = value[:, i]
-            #     mask_i = mask[:, i]
-            #
-            #     artificial_missingness = 0.4
-            #     mask_i_input = torch.zeros_like(mask_i)
-            #     mask_i_eval = torch.zeros_like(mask_i)
-            #     for entry_idx, mask_entry in enumerate(mask_i):
-            #         if mask_entry != 0:
-            #             if random.uniform(0, 1) >= artificial_missingness:
-            #                 mask_i_input[entry_idx] = 1
-            #             else:
-            #                 mask_i_eval[entry_idx] = 1
-            #     mask_i_input = mask_i_input.type_as(mask_i)
-            #     mask_i_eval = mask_i_eval.type_as(mask_i)
-            #
-            #     ts_context.append(t[mask_i_input == 1])
-            #     xs_context.append(value_i[mask_i_input == 1])
-            #     task_context = torch.full((ts_context[-1].shape[0], 1), dtype=torch.long, fill_value=i).type_as(t)
-            #     tasks_context.append(task_context)
-            #
-            #     ts_target.append(t[mask_i_eval == 1])
-            #     xs_target.append(value_i[mask_i_eval == 1])
-            #     task_target = torch.full((ts_target[-1].shape[0], 1), dtype=torch.long, fill_value=i).type_as(t)
-            #     tasks_target.append(task_target)
-            #
-            # full_t_context = torch.cat(ts_context)
-            # full_tasks_context = torch.cat(tasks_context)
-            # full_x_context = torch.cat(xs_context)
-            #
-            # full_t_target = torch.cat(ts_target)
-            # full_tasks_target = torch.cat(tasks_target)
-            # full_x_target = torch.cat(xs_target)
-            #
-            # input_task_t_context = torch.cat((full_tasks_context, full_t_context.view(full_t_context.shape[0], 1)), dim=-1)
-            #
-            # input_task_t_target = torch.cat((full_tasks_target, full_t_target.view(full_t_target.shape[0], 1)), dim=-1)
-
-
-
             # vectorized version
             ts = t.view(-1, 1).repeat(1, self.num_tasks)
             tasks = torch.tensor([task_i for task_i in range(self.num_tasks)]).view(1, -1).repeat(t.shape[0], 1).type_as(ts)
 
-            # prevent input and eval arrays from sharing the same memory
+
             # generate mask tensor
-            # self.sample_tp
             if self.train_mode:
                 artificial_missingness = random.uniform(self.sample_tp_interval[0], self.sample_tp_interval[-1])
             else:
@@ -195,7 +159,7 @@ class MGPImputer(pl.LightningModule):
             if self.data_mode == "simulation":
                 full_t_gt = ts[mask != 1]
                 full_tasks_gt = tasks[mask != 1]
-                full_x_gt = gt_values[num_seq][mask != 1]
+                full_x_gt = gt_values[num_seq][mask != 1].type_as(full_t_gt)
                 # full_tasks_gt, full_t_gt, full_x_gt = sort_by_task_t(full_tasks_gt, full_t_gt, full_x_gt)
                 input_task_t_gt = torch.cat(
                     (full_tasks_gt.view(full_tasks_gt.shape[0], 1),
@@ -204,7 +168,6 @@ class MGPImputer(pl.LightningModule):
 
             # contextualize the model
             # form loss for both context points and target points to stabilize training process
-
             if self.train_mode:
                 input_task_t_target = torch.cat((input_task_t_context, input_task_t_target), dim=0)
                 full_x_target = torch.cat((full_x_context, full_x_target), dim=0)
@@ -215,32 +178,30 @@ class MGPImputer(pl.LightningModule):
             output = self(input_task_t_target)
             recon_loss_target += -self.mll(output, full_x_target, [input_task_t_target])
 
-            # in order not to slow down training process (only the evaluation process will be slowed down)
-            if not self.train_mode:
-                with gpytorch.settings.debug(False), gpytorch.settings.fast_pred_var(), torch.no_grad():
-                    self.mgp.eval()
-                    # calculate losses for input
-                    observed_pred = self.mgp.likelihood(self.mgp(input_task_t_target), [input_task_t_target])
-                    mae_loss_target += self.mae_loss(observed_pred.mean, full_x_target)
-                    mse_loss_target += f.mse_loss(observed_pred.mean, full_x_target)
+            # necessary to avoid nan loss
+            self.train()
+            with gpytorch.settings.debug(False), gpytorch.settings.fast_pred_var(), torch.no_grad():
+                # calculate losses for input
+                observed_pred = self.mgp.likelihood(self.mgp(input_task_t_target.detach()), [input_task_t_target.detach()])
+                mae_loss_target += self.mae_loss(observed_pred.mean, full_x_target)
+                mse_loss_target += f.mse_loss(observed_pred.mean, full_x_target)
 
-                    # calculate losses for context
-                    observed_pred = self.mgp.likelihood(self.mgp(input_task_t_context), [input_task_t_context])
-                    mae_loss_context += self.mae_loss(observed_pred.mean, full_x_context)
-                    mse_loss_context += f.mse_loss(observed_pred.mean, full_x_context)
+                # calculate losses for context
+                observed_pred = self.mgp.likelihood(self.mgp(input_task_t_context), [input_task_t_context])
+                mae_loss_context += self.mae_loss(observed_pred.mean, full_x_context)
+                mse_loss_context += f.mse_loss(observed_pred.mean, full_x_context)
 
-                    output = self(input_task_t_context)
-                    recon_loss_context += -self.mll(output, full_x_context, [input_task_t_context])
+                output = self.mgp(input_task_t_context)
+                recon_loss_context += -self.mll(output, full_x_context, [input_task_t_context])
 
-                    # calculate losses for ground truth
-                    if self.data_mode == "simulation":
-                        observed_pred = self.mgp.likelihood(self.mgp(input_task_t_gt), [input_task_t_gt])
-                        mae_loss_gt += self.mae_loss(observed_pred.mean, full_x_gt)
-                        mse_loss_gt += f.mse_loss(observed_pred.mean, full_x_gt)
+                # calculate losses for ground truth
+                if self.data_mode == "simulation":
+                    observed_pred = self.mgp.likelihood(self.mgp(input_task_t_gt), [input_task_t_gt])
+                    mae_loss_gt += self.mae_loss(observed_pred.mean, full_x_gt)
+                    mse_loss_gt += f.mse_loss(observed_pred.mean, full_x_gt)
 
-                        output = self(input_task_t_gt)
-                        recon_loss_gt += -self.mll(output, full_x_gt, [input_task_t_gt])
-
+                    output = self.mgp(input_task_t_gt)
+                    recon_loss_gt += -self.mll(output, full_x_gt, [input_task_t_gt])
 
             num_seq += 1
         return recon_loss_target/num_seq, recon_loss_context/num_seq, recon_loss_gt/num_seq, \
@@ -252,9 +213,7 @@ class MGPImputer(pl.LightningModule):
         recon_loss_target, recon_loss_context, recon_loss_gt, \
             mae_loss_target, mae_loss_context, mae_loss_gt, \
             mse_loss_target, mse_loss_context, mse_loss_gt = self._calculate_loss(batch)
-        # self.log("t_recon_loss", recon_loss)
-        # self.log("t_mae_loss", mae_loss)
-        # self.log("t_mse_loss", mse_loss)
+
         if self.data_mode == "simulation":
             self.log_dict({"t_recon_loss_target": recon_loss_target, "t_recon_loss_context": recon_loss_context, "t_recon_loss_gt": recon_loss_gt,
                            "t_mae_loss_target": mae_loss_target, "t_mae_loss_context": mae_loss_context, "t_mae_loss_gt": mae_loss_gt,
@@ -263,13 +222,8 @@ class MGPImputer(pl.LightningModule):
             self.log_dict({"t_recon_loss_target": recon_loss_target, "t_recon_loss_context": recon_loss_context,
                            "t_mae_loss_target": mae_loss_target, "t_mae_loss_context": mae_loss_context,
                            "t_mse_loss_target": mse_loss_target, "t_mse_loss_context": mse_loss_context}, on_step=True)
-        # return {"t_recon_loss": recon_loss, "t_mae_loss": mae_loss, "t_mse_loss": mse_loss}
-        # tensorboard_logs = {"t_recon_loss": recon_loss, "t_mae_loss": mae_loss, "t_mse_loss": mse_loss}
-        # return {"loss": recon_loss, 'log': tensorboard_logs}
-        return recon_loss_target
 
-    def training_epoch_end(self, outputs):
-        return super().training_epoch_end(outputs)
+        return recon_loss_target
 
     def validation_step(self, batch, batch_idx):
         self.train_mode = False
@@ -279,9 +233,7 @@ class MGPImputer(pl.LightningModule):
                 mae_loss_target, mae_loss_context, mae_loss_gt, \
                 mse_loss_target, mse_loss_context, mse_loss_gt = self._calculate_loss(batch)
         self.eval()
-        # self.log("v_recon_loss", recon_loss)
-        # self.log("v_mae_loss", mae_loss)
-        # self.log("v_mse_loss", mse_loss)
+
         if self.data_mode == "simulation":
             self.log_dict({"v_recon_loss_target": recon_loss_target, "v_recon_loss_context": recon_loss_context, "v_recon_loss_gt": recon_loss_gt,
                            "v_mae_loss_target": mae_loss_target, "v_mae_loss_context": mae_loss_context, "v_mae_loss_gt": mae_loss_gt,
@@ -290,45 +242,40 @@ class MGPImputer(pl.LightningModule):
             self.log_dict({"v_recon_loss_target": recon_loss_target, "v_recon_loss_context": recon_loss_context,
                            "v_mae_loss_target": mae_loss_target, "v_mae_loss_context": mae_loss_context,
                            "v_mse_loss_target": mse_loss_target, "v_mse_loss_context": mse_loss_context}, on_step=True)
-        # return {"v_recon_loss": recon_loss, "v_mae_loss": mae_loss, "v_mse_loss": mse_loss}
-        # tensorboard_logs = {"v_recon_loss": recon_loss, "v_mae_loss": mae_loss, "v_mse_loss": mse_loss}
-        # return {"v_loss": recon_loss, 'log': tensorboard_logs}
+
         return recon_loss_target
 
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=0.1)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
 
     def init_kernels(self):
         pass
 
-    def prepare_data(self, force=False) -> None:
-        name = 'toydataset_50000'
+    def prepare_data(self) -> None:
+        name = self.dataset_name
         path = data_utils.datasets_dict[name]
         dataset = data_utils.ToyDataDf(path)
-        dataset.create_mcar_missingness(0.6, -1)
-        dataloader_dict = dataset.prepare_data_mtan(batch_size=128)
+        dataset.create_mcar_missingness(self.data_missingness, -1)
+        dataloader_dict = dataset.prepare_data_mtan(batch_size=self.batch_size)
         self.dataloader_dict = dataloader_dict
+        self.gt_train_loader_iter = iter(self.dataloader_dict['train_ground_truth'])
+        self.gt_validation_loader_iter = iter(self.dataloader_dict['validation_ground_truth'])
 
     def train_dataloader(self):
-        if self.data_mode == "simulation":
-            return zip(self.dataloader_dict['train'], self.dataloader_dict['train_ground_truth'])
-        else:
-            return self.dataloader_dict['train']
+        return self.dataloader_dict['train']
 
     def val_dataloader(self):
-        if self.data_mode == "simulation":
-            return zip(self.dataloader_dict['validation'], self.dataloader_dict['validation_ground_truth'])
-        else:
-            return self.dataloader_dict['validation']
+        return self.dataloader_dict['validation']
 
     def test_dataloader(self):
         pass
 
     def training_epoch_end(self, outputs):
-        pass
+        self.gt_train_loader_iter = iter(self.dataloader_dict['train_ground_truth'])
+
     def validation_epoch_end(self, outputs):
-        pass
+        self.gt_validation_loader_iter = iter(self.dataloader_dict['validation_ground_truth'])
 
     # other customized class method
     # sample_tp can vary during inference
@@ -383,11 +330,12 @@ class MGPImputer(pl.LightningModule):
         self.observed_pred = observed_pred
         return pred_mean, quantile_low, quantile_high, mask_dict, observed_pred
 
-    # @staticmethod
+    # only can be used after calling the method self.impute()
     def sample_seq(self):
         # vectorized version
         return self.observed_pred.sample().view(-1, self.num_tasks)
 
+    # only can be used after calling the method self.impute() and self.sample_seq()
     def plot_seq(self, t, value,
                  plot_idx=0,
                  plot_save_folder=None,
@@ -424,7 +372,32 @@ class MGPImputer(pl.LightningModule):
 
 
 if __name__ == "__main__":
-    mod = MGPImputer()
+    parser = argparse.ArgumentParser()
+    # synthetic dataset parameters
+    parser.add_argument("--dataset_name", default="toydataset_50000", type=str)
+    parser.add_argument("--data_missingness", default=0.6, type=float)
+
+    # model parameters
+    parser.add_argument("--num_kernels", default=10, type=int)
+    parser.add_argument("--num_tasks", default=4, type=int)
+    parser.add_argument("--rank", default=4, type=int)
+
+    # training/eval config: if data_mode == "simulation", we evaluate for gt data
+    parser.add_argument("--data_mode", default="simulation", type=str)
+    parser.add_argument("--lr", default=0.01, type=int)
+    parser.add_argument("--batch_size", default=128, type=int)
+    parser.add_argument("--sample_tp", default=0.4, type=int)
+    parser.add_argument("--sample_tp_interval", default=[0.1, 0.8], type=list)
+    parser.add_argument("--num_epochs", default=100, type=int)
+
+    # model save
+    parser.add_argument("--model_weights_save_path", default="./model_weights", type=str)
+
+    # initialize parameters dict
+    pars = vars(parser.parse_args())
+    pars['task_names'] = ['Noise', 'Trend', "Seasonality", "Trend + Seasonality"]
+
+    mod = MGPImputer(**pars)
     mod.prepare_data()
     num_train_batches = len(mod.dataloader_dict['train'])
 
@@ -435,22 +408,13 @@ if __name__ == "__main__":
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor='v_recon_loss_target',  # the metric to monitor
         dirpath=model_weights_folder_path,
-        filename='best_model-{v_recon_loss_target:.2f}',  # the file name pattern for the saved checkpoint
-        save_top_k=1,  # save the top 1 model
+        filename='best_model-{v_recon_loss_target:.2f}-{epoch}',  # the file name pattern for the saved checkpoint
+        save_top_k=2,  # save the top 1 model
         mode='min'  # the mode to compare the monitored metric (either 'min' or 'max')
     )
 
-    # define the TensorBoard logger
-    # logger = pl.loggers.TensorBoardLogger("./logs", name="multitask_gp")
-
-    # define the TensorBoard callback
-    # tb_callback = pl.callbacks.TensorBoardCallback(
-    #     log_every_n_steps=10,
-    #     write_graph=True
-    # )
-
     # now set it to None, since gpu doesn't accelerate the training process
-    trainer = pl.Trainer(max_epochs=3, gpus=1,
+    trainer = pl.Trainer(max_epochs=pars["num_epochs"], gpus=1,
                          # log_every_n_steps=num_train_batches,
                          # logger=logger,
                          callbacks=[checkpoint_callback],

@@ -331,9 +331,39 @@ class MGPImputer(pl.LightningModule):
         return pred_mean, quantile_low, quantile_high, mask_dict, observed_pred
 
     # only can be used after calling the method self.impute()
-    def sample_seq(self):
+    def sample_seq(self, sample_size=1000):
         # vectorized version
-        return self.observed_pred.sample().view(-1, self.num_tasks)
+        return self.observed_pred.sample(sample_shape=torch.Size([sample_size])).view(sample_size, -1, self.num_tasks)
+
+    def impute_and_sample_in_batch(self, masks, values, t, sample_tp=0.2, sample_size=1000):
+        pred_mean_batch = []
+        quantile_low_batch = []
+        quantile_high_batch = []
+        mask_dict_batch = {"input": [], "eval": [], "gt": []}
+        # observed_pred_batch = []
+        sampled_seqs_batch = []
+        for mask, value in zip(masks, values):  # Static features and sepsis label not needed
+            pred_mean, quantile_low, quantile_high, mask_dict, _ = self.impute(mask, value, t, sample_tp=sample_tp)
+            sampled_seqs = self.sample_seq(sample_size=sample_size)
+            pred_mean_batch.append(pred_mean.unsqueeze(0))
+            quantile_low_batch.append(quantile_low.unsqueeze(0))
+            quantile_high_batch.append(quantile_high.unsqueeze(0))
+            mask_dict_batch["input"].append(mask_dict["input"].unsqueeze(0))
+            mask_dict_batch["eval"].append(mask_dict["eval"].unsqueeze(0))
+            mask_dict_batch["gt"].append(mask_dict["gt"].unsqueeze(0))
+            # observed_pred_batch.append(observed_pred.unsqueeze(0))
+            sampled_seqs_batch.append(sampled_seqs.unsqueeze(0))
+
+        pred_mean_batch = torch.cat(pred_mean_batch)
+        quantile_low_batch = torch.cat(quantile_low_batch)
+        quantile_high_batch = torch.cat(quantile_high_batch)
+        sampled_seqs_batch = torch.cat(sampled_seqs_batch)
+
+        mask_dict_batch["input"] = torch.cat(mask_dict_batch["input"])
+        mask_dict_batch["eval"] = torch.cat(mask_dict_batch["eval"])
+        mask_dict_batch["gt"] = torch.cat(mask_dict_batch["gt"])
+
+        return pred_mean_batch, quantile_low_batch, quantile_high_batch, sampled_seqs_batch, mask_dict_batch
 
     # only can be used after calling the method self.impute() and self.sample_seq()
     def plot_seq(self, t, value,

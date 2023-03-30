@@ -24,11 +24,12 @@ warnings.filterwarnings('ignore', '.*triangular_solve is deprecated.*', )
 # with torch.no_grad() -> mae/mse mll(gt...)
 # best model definition: based mll
 
+# TODO: make ts non integer (samples in a batch)
 def mask_collate(batch):
     #
     masks = batch[:, :, 4: -1]
     values = batch[:, :, :4]
-    t = batch[0, :, -1]
+    t = batch[:, :, -1]
 
     # further create input mask and eval mask
     return masks, values, t
@@ -105,19 +106,17 @@ class MGPImputer(pl.LightningModule):
 
         num_seq = 0
 
-        masks, values, t = mask_collate(batch)
-        if self.data_mode == "simulation" and self.train_mode:
-
-            # re-initialize as a iterator by the end of epoch
-            gt_batch = next(self.gt_train_loader_iter)
+        masks, values, ts_batch = mask_collate(batch)
+        if self.data_mode == "simulation":
+            if self.train_mode:
+                gt_batch = next(self.gt_train_loader_iter)
+            else:
+                gt_batch = next(self.gt_validation_loader_iter)
             _, gt_values, _ = mask_collate(gt_batch)
 
-        if self.data_mode == "simulation" and not self.train_mode:
-            gt_batch = next(self.gt_validation_loader_iter)
-            _, gt_values, _ = mask_collate(gt_batch)
-
-        for mask, value in zip(masks, values):  # Static features and sepsis label not needed
+        for mask, value, t in zip(masks, values, ts_batch):  # Static features and sepsis label not needed
             # vectorized version
+            # now we assume that task 1/ task2/ task3 share same t here, which could be non-integer
             ts = t.view(-1, 1).repeat(1, self.num_tasks)
             tasks = torch.tensor([task_i for task_i in range(self.num_tasks)]).view(1, -1).repeat(t.shape[0], 1).type_as(ts)
 
@@ -140,7 +139,6 @@ class MGPImputer(pl.LightningModule):
             full_t_context = ts[mask_input == 1]
             full_tasks_context = tasks[mask_input == 1]
             full_x_context = value[mask_input == 1]
-            # full_tasks_context, full_t_context, full_x_context = sort_by_task_t(full_tasks_context, full_t_context, full_x_context)
             input_task_t_context = torch.cat(
                 (full_tasks_context.view(full_tasks_context.shape[0], 1),
                  full_t_context.view(full_t_context.shape[0], 1)),
@@ -150,7 +148,6 @@ class MGPImputer(pl.LightningModule):
             full_t_target = ts[mask_eval == 1]
             full_tasks_target = tasks[mask_eval == 1]
             full_x_target = value[mask_eval == 1]
-            # full_tasks_target, full_t_target, full_x_target = sort_by_task_t(full_tasks_target, full_t_target, full_x_target)
             input_task_t_target = torch.cat(
                  (full_tasks_target.view(full_tasks_target.shape[0], 1),
                   full_t_target.view(full_t_target.shape[0], 1)),
@@ -277,18 +274,16 @@ class MGPImputer(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         self.gt_validation_loader_iter = iter(self.dataloader_dict['validation_ground_truth'])
 
-    # other customized class method
-    # sample_tp can vary during inference
-    def impute(self, mask, value, t, sample_tp):
+    def impute(self, mask, value, t, sample_tp, target_t=None):
         # if there should be no artificial missingness, sample_tp should be set to 0
-
         # vectorize ts and tasks tensor for masking
         ts = t.view(-1, 1).repeat(1, self.num_tasks)
         tasks = torch.tensor([task_i for task_i in range(self.num_tasks)]).view(1, -1).repeat(t.shape[0], 1)
 
         # vectorized implementation
-        # prevent input and eval arrays from sharing the same memory
+        # TODO: double check the consistency between the meaning of sample_tp and artificial_missingness
         artificial_missingness = sample_tp
+        # prevent input and eval arrays from sharing the same memory
         mask_input = copy.deepcopy(mask)
         mask_eval = copy.deepcopy(mask)
         mask_input[mask == 1] = torch.from_numpy(np.random.choice([0, 1],
@@ -309,7 +304,13 @@ class MGPImputer(pl.LightningModule):
 
         # vectorized version
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            input_task_t_target = torch.cat((tasks.view(-1, 1), ts.view(-1, 1)), dim=-1)
+            if target_t is None:
+                input_task_t_target = torch.cat((tasks.view(-1, 1), ts.view(-1, 1)), dim=-1)
+            else:
+                target_ts = target_t.view(-1, 1).repeat(1, self.num_tasks)
+                tasks_target = torch.tensor([task_i for task_i in range(self.num_tasks)]).view(1, -1).repeat(
+                    target_t.shape[0], 1)
+                input_task_t_target = torch.cat((tasks_target.view(-1, 1), target_ts.view(-1, 1)), dim=-1)
             self.mgp.eval()
             observed_pred = self.mgp.likelihood(self.mgp(input_task_t_target), [input_task_t_target])
             lower_2d, upper_2d = observed_pred.confidence_region()
@@ -322,12 +323,12 @@ class MGPImputer(pl.LightningModule):
         pred_mean = observed_pred.mean.view(-1, self.num_tasks)
 
         mask_dict = {'input': mask_input, 'eval': mask_eval, 'gt': mask}
-
         self.mask_dict = mask_dict
         self.pred_mean = pred_mean
         self.quantile_low = quantile_low
         self.quantile_high = quantile_high
         self.observed_pred = observed_pred
+
         return pred_mean, quantile_low, quantile_high, mask_dict, observed_pred
 
     # only can be used after calling the method self.impute()
@@ -335,29 +336,34 @@ class MGPImputer(pl.LightningModule):
         # vectorized version
         return self.observed_pred.sample(sample_shape=torch.Size([sample_size])).view(sample_size, -1, self.num_tasks)
 
-    def impute_and_sample_in_batch(self, masks, values, t, sample_tp=0.2, sample_size=1000):
+    def impute_and_sample_in_batch(self, masks, values, ts, sample_tp=0.2, sample_size=1000, target_ts=None):
+        # if the target_ts is of size [50] and shared across samples in the batch
+        # supports target time points that are individually different for each sample in the batch
+        if target_ts is not None and len(target_ts.shape) == 1:
+            target_ts = target_ts.repeat(ts.shape[0], 1)
+
         pred_mean_batch = []
         quantile_low_batch = []
         quantile_high_batch = []
-        mask_dict_batch = {"input": [], "eval": [], "gt": []}
-        # observed_pred_batch = []
         sampled_seqs_batch = []
-        for mask, value in zip(masks, values):  # Static features and sepsis label not needed
-            pred_mean, quantile_low, quantile_high, mask_dict, _ = self.impute(mask, value, t, sample_tp=sample_tp)
+        mask_dict_batch = {"input": [], "eval": [], "gt": []}
+
+        # make iterable of None to avoid crash of the coming for loop
+        if target_ts is None:
+            target_ts = [None for _ in range(ts.shape[0])]
+
+        for mask, value, t, target_t in zip(masks, values, ts, target_ts):  # Static features and sepsis label not needed
+            pred_mean, quantile_low, quantile_high, mask_dict, _ = self.impute(mask, value, t, sample_tp=sample_tp,
+                                                                               target_t=target_t)
             sampled_seqs = self.sample_seq(sample_size=sample_size)
             pred_mean_batch.append(pred_mean.unsqueeze(0))
             quantile_low_batch.append(quantile_low.unsqueeze(0))
             quantile_high_batch.append(quantile_high.unsqueeze(0))
+            sampled_seqs_batch.append(sampled_seqs.unsqueeze(0))
+
             mask_dict_batch["input"].append(mask_dict["input"].unsqueeze(0))
             mask_dict_batch["eval"].append(mask_dict["eval"].unsqueeze(0))
             mask_dict_batch["gt"].append(mask_dict["gt"].unsqueeze(0))
-            # observed_pred_batch.append(observed_pred.unsqueeze(0))
-            sampled_seqs_batch.append(sampled_seqs.unsqueeze(0))
-
-        pred_mean_batch = torch.cat(pred_mean_batch)
-        quantile_low_batch = torch.cat(quantile_low_batch)
-        quantile_high_batch = torch.cat(quantile_high_batch)
-        sampled_seqs_batch = torch.cat(sampled_seqs_batch)
 
         mask_dict_batch["input"] = torch.cat(mask_dict_batch["input"])
         mask_dict_batch["eval"] = torch.cat(mask_dict_batch["eval"])
@@ -367,6 +373,8 @@ class MGPImputer(pl.LightningModule):
 
     # only can be used after calling the method self.impute() and self.sample_seq()
     def plot_seq(self, t, value,
+                 target_t = None,
+                 # sampled_seqs_target_t = None,
                  plot_idx=0,
                  plot_save_folder=None,
                  gt_value=None,
@@ -378,12 +386,32 @@ class MGPImputer(pl.LightningModule):
                          value[:, i][self.mask_dict['input'][:, i] == 1].detach().numpy(), 'k*')
             axes[i].plot(t[self.mask_dict['gt'][:, i] == 1].detach().numpy(),
                          value[:, i][self.mask_dict['gt'][:, i] == 1].detach().numpy(), 'yo', alpha=0.4)
-            # Predictive mean as blue line
-            axes[i].plot(t.detach().numpy(), self.pred_mean[:, i].detach().numpy(), 'b')
-            # Shade in confidence
-            axes[i].fill_between(t.detach().numpy(),
-                                 self.quantile_low[:, i].detach().numpy(),
-                                 self.quantile_high[:, i].detach().numpy(), alpha=0.5)
+
+            if target_t is not None:
+                # Predicted target mean as blue line
+                axes[i].plot(target_t.detach().numpy(), self.pred_mean[:, i].detach().numpy(), 'b')
+                # Predicted target variance
+                axes[i].fill_between(target_t.detach().numpy(),
+                                     self.quantile_low[:, i].detach().numpy(),
+                                     self.quantile_high[:, i].detach().numpy(), alpha=0.5)
+                # sampled sequence as green line
+                if sampled_seqs is not None:
+                    for sampled_seq in sampled_seqs:
+                            axes[i].plot(target_t.detach().numpy(), sampled_seq[:, i].detach().numpy(), 'g', alpha=0.1)
+
+            else:
+                # Predicted target mean as blue line
+                axes[i].plot(t.detach().numpy(), self.pred_mean[:, i].detach().numpy(), 'b')
+                # Predicted target variance
+                axes[i].fill_between(t.detach().numpy(),
+                                     self.quantile_low[:, i].detach().numpy(),
+                                     self.quantile_high[:, i].detach().numpy(), alpha=0.5)
+                # sampled sequence as green line
+                if sampled_seqs is not None:
+                    for sampled_seq in sampled_seqs:
+                            axes[i].plot(t.detach().numpy(), sampled_seq[:, i].detach().numpy(), 'g', alpha=0.1)
+
+
             # if we also want to visualize ground truth
             if gt_value is not None:
                 axes[i].plot(t.detach().numpy(), gt_value[:, i].detach().numpy(), 'r')
@@ -391,9 +419,6 @@ class MGPImputer(pl.LightningModule):
             else:
                 axes[i].legend(['Input Data', 'Input + Eval Data', 'Mean', 'Confidence'])
 
-            if sampled_seqs is not None:
-                for sampled_seq in sampled_seqs:
-                    axes[i].plot(t.detach().numpy(), sampled_seq[:, i].detach().numpy(), 'g', alpha=0.1)
 
             axes[i].set_title(self.task_names[i])
         save_path = os.path.join(plot_save_folder, f'{plot_idx}th_plot.png')

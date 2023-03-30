@@ -1,6 +1,6 @@
 import os
 import time
-
+import torch
 from toy_dataset import data_utils
 from train import MGPImputer, mask_collate
 
@@ -39,15 +39,8 @@ if __name__ == "__main__":
 
     # for showing how to do batch-wise imputation and sampling + speed benchmarking
     time_start_total = time.time()
-    for i_batch, sample in enumerate(data_loader):
-        time_start_batch = time.time()
-        masks, values, t = mask_collate(sample)
-        pred_mean_batch, quantile_low_batch, quantile_high_batch, sampled_seqs_batch, mask_dict_batch = \
-            imputer.impute_and_sample_in_batch(masks, values, t, sample_tp=0.2, sample_size=1000)
-        time_delta_batch = time.time() - time_start_batch
-        print(f"this batch takes {time_delta_batch} for processing")
-    time_delta_total = time.time() - time_start_total
-    print(f"all batches take {time_delta_total} for processing")
+    target_ts = torch.tensor([1.5, 2.5, 3.5, 4.5, 5.5]) # [50]
+    target_t = target_ts
 
     # visualisation for debugging the model
     if VISUALISE_FOR_DEBUG:
@@ -55,14 +48,22 @@ if __name__ == "__main__":
             gt_sample = next(gt_iter)
             _, gt_values, _ = mask_collate(gt_sample)
 
-            masks, values, t = mask_collate(sample)
+            masks, values, ts = mask_collate(sample)
             time_start_batch = time.time()
-            for mask, value, gt_value in zip(masks, values, gt_values):  # Static features and sepsis label not needed
-                pred_mean, quantile_low, quantile_high, mask_dict, observed_pred = imputer.impute(mask, value, t, sample_tp=0.0)
+            for mask, value, gt_value, t in zip(masks, values, gt_values, ts):  # Static features and sepsis label not needed
+
+                pred_mean_target, quantile_low_target, \
+                    quantile_high_target, mask_dict, _ = \
+                    imputer.impute(mask, value, t, sample_tp=0.2, target_t=target_t)
+
+                sampled_seqs_target = imputer.sample_seq(sample_size=num_sampled_seqs_per_plot)
+
                 sampled_seqs = imputer.sample_seq(sample_size=num_sampled_seqs_per_plot)
 
                 if num_plots < max_num_plots:
                     imputer.plot_seq(t, value,
+                                     # sampled_seqs_target_t=sampled_seqs_target,
+                                     target_t=target_t,
                                      plot_idx=num_plots,
                                      plot_save_folder=plot_save_folder,
                                      gt_value=gt_value,

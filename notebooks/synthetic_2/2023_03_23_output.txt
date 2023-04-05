@@ -1,0 +1,38 @@
+2023-03-24 00:12:49.037678: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
+To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2023-03-24 00:12:49.491837: W tensorflow/compiler/xla/stream_executor/platform/default/dso_loader.cc:64] Could not load dynamic library 'libcudart.so.11.0'; dlerror: libcudart.so.11.0: cannot open shared object file: No such file or directory
+2023-03-24 00:12:49.491856: I tensorflow/compiler/xla/stream_executor/cuda/cudart_stub.cc:29] Ignore above cudart dlerror if you do not have a GPU set up on your machine.
+2023-03-24 00:13:33.304632: W tensorflow/compiler/xla/stream_executor/platform/default/dso_loader.cc:64] Could not load dynamic library 'libnvinfer.so.7'; dlerror: libnvinfer.so.7: cannot open shared object file: No such file or directory
+2023-03-24 00:13:33.308021: W tensorflow/compiler/xla/stream_executor/platform/default/dso_loader.cc:64] Could not load dynamic library 'libnvinfer_plugin.so.7'; dlerror: libnvinfer_plugin.so.7: cannot open shared object file: No such file or directory
+2023-03-24 00:13:33.308030: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Cannot dlopen some TensorRT libraries. If you would like to use Nvidia GPU with TensorRT, please make sure the missing libraries mentioned above are installed properly.
+  0%|          | 0/2000 [00:00<?, ?it/s]  4%|▍         | 87/2000 [00:00<00:02, 770.00it/s] 14%|█▍        | 278/2000 [00:00<00:01, 1405.27it/s] 23%|██▎       | 469/2000 [00:00<00:00, 1626.72it/s] 33%|███▎      | 661/2000 [00:00<00:00, 1739.82it/s] 43%|████▎     | 852/2000 [00:00<00:00, 1799.92it/s] 52%|█████▏    | 1045/2000 [00:00<00:00, 1841.22it/s] 62%|██████▏   | 1241/2000 [00:00<00:00, 1879.70it/s] 72%|███████▏  | 1438/2000 [00:00<00:00, 1906.24it/s] 82%|████████▏ | 1633/2000 [00:00<00:00, 1918.36it/s] 91%|█████████▏| 1828/2000 [00:01<00:00, 1927.62it/s]100%|██████████| 2000/2000 [00:01<00:00, 1812.98it/s]
+  0%|          | 0/2000 [00:00<?, ?it/s] 10%|█         | 209/2000 [00:00<00:00, 2081.37it/s] 21%|██        | 418/2000 [00:00<00:00, 2072.02it/s] 31%|███▏      | 626/2000 [00:00<00:00, 2069.75it/s] 42%|████▏     | 833/2000 [00:00<00:00, 2068.74it/s] 52%|█████▏    | 1041/2000 [00:00<00:00, 2071.57it/s] 62%|██████▏   | 1249/2000 [00:00<00:00, 2067.83it/s] 73%|███████▎  | 1456/2000 [00:00<00:00, 2066.64it/s] 83%|████████▎ | 1663/2000 [00:00<00:00, 2064.51it/s] 94%|█████████▎| 1870/2000 [00:00<00:00, 2064.08it/s]100%|██████████| 2000/2000 [00:00<00:00, 2066.35it/s]
+  0%|          | 0/2000 [00:00<?, ?it/s] 10%|▉         | 198/2000 [00:00<00:00, 1977.63it/s] 20%|█▉        | 396/2000 [00:00<00:00, 1977.41it/s] 30%|██▉       | 594/2000 [00:00<00:00, 1503.71it/s] 40%|███▉      | 791/2000 [00:00<00:00, 1655.66it/s] 49%|████▉     | 987/2000 [00:00<00:00, 1751.29it/s] 59%|█████▉    | 1182/2000 [00:00<00:00, 1813.56it/s] 69%|██████▉   | 1378/2000 [00:00<00:00, 1858.24it/s] 79%|███████▊  | 1572/2000 [00:00<00:00, 1881.01it/s] 88%|████████▊ | 1767/2000 [00:00<00:00, 1901.68it/s] 98%|█████████▊| 1961/2000 [00:01<00:00, 1913.16it/s]100%|██████████| 2000/2000 [00:01<00:00, 1832.75it/s]
+Global seed set to 42
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+IPU available: False, using: 0 IPUs
+HPU available: False, using: 0 HPUs
+{'dataset_name': 'toydataset_50000', 'data_missingness': 0.6, 'num_kernels': 10, 'num_tasks': 5, 'rank': 4, 'data_mode': 'no_simulation', 'lr': 0.01, 'batch_size': 128, 'sample_tp': 0.4, 'sample_tp_interval': [0.3, 0.8], 'num_epochs': 10, 'model_weights_save_path': './model_weights', 'model_type': 'gaussian_process', 'dataset_params': {'missingness_value': 'nan', 'missingness_rate': (0, 0), 'device': 'cuda'}, 'dataloader_params': {'batch_size': 400, 'shuffle': False, 'drop_last': True}, 'trainer_params': {'max_epochs': 250, 'auto_lr_find': False, 'fast_dev_run': False, 'accelerator': 'cuda', 'devices': 1, 'profiler': None, 'num_sanity_val_steps': 0}, 'ckpt_path': 'best_model-v_recon_loss_target=1.42-epoch=62.ckpt', 'directory': '../../../data/ts/synthetic_2/MCAR_1/mi_models/mi_simple_gp/', 'mode': 'imputation', 'task_names': ['Noise', 'Trend', 'Seasonality', 'Trend + Seasonality']} 
+
+
+Traceback (most recent call last):
+  File "gp_train_script.py", line 83, in <module>
+    mi_model = MultipleImputationModel_ts(  
+  File "/home2/joshua.wendland/Documents/afa_ts/afa/data_modelling/missingness/multiple_imputation/multiple_imputation_model_ts.py", line 38, in __init__
+    super().__init__(name, m_graph, superfeature_mapping , model_params, target_superfeature_names, directory)
+  File "/home2/joshua.wendland/Documents/afa_ts/afa/data_modelling/missingness/multiple_imputation/multiple_imputation_model.py", line 58, in __init__
+    self.base_model = self._build_model(    m_graph           = m_graph , 
+  File "/home2/joshua.wendland/Documents/afa_ts/afa/data_modelling/missingness/multiple_imputation/multiple_imputation_model_ts.py", line 168, in _build_model
+    base_mi_model = utils.define_base_model_imputer_ts(
+  File "/home2/joshua.wendland/Documents/afa_ts/afa/data_modelling/models/temporal_models/utils.py", line 28, in define_base_model_imputer_ts
+    model_ts = GaussianProcessImputer(model_type, model_params, mode)
+  File "/home2/joshua.wendland/Documents/afa_ts/afa/data_modelling/models/temporal_models/mi_models/gp_model.py", line 91, in __init__
+    path = self.get_checkpoint_path(self.pars['ckpt_path'])
+  File "/home2/joshua.wendland/Documents/afa_ts/afa/data_modelling/models/temporal_models/mi_models/gp_model.py", line 295, in get_checkpoint_path
+    raise FileNotFoundError(error_msg)
+FileNotFoundError: The requested model version ../../../data/ts/synthetic_2/MCAR_1/mi_models/mi_simple_gp/model_weights/best_model-v_recon_loss_target=1.42-epoch=62.ckpt does not exist. The following versions are available: (please copy one below and enter it as version argument)
+	- best_model-v_recon_loss_target=1.10-epoch=127.ckpt
+	- best_model-v_recon_loss_target=1.10-epoch=133.ckpt
+	- best_model-v_recon_loss_target=1.10-epoch=143.ckpt
+	- best_model-v_recon_loss_target=1.10-epoch=142.ckpt

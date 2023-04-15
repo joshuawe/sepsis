@@ -6,9 +6,10 @@ import pytorch_lightning as pl
 import wandb
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, f1_score, classification_report, ConfusionMatrixDisplay, roc_curve, auc
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 
@@ -20,7 +21,8 @@ def get_label_and_preds(model, dataloader: "FastDataLoader"):
     # get predictions and targets
     y_true = []
     y_score = []
-    for batch in tqdm(dataloader, desc="Calculating metrics"):
+    # for batch in tqdm(dataloader, desc="Calculating metrics"):
+    for batch in dataloader:
         input = batch[:, :, :-1]
         target = batch[:, :, -1]
         pred, _, _ = model(batch)
@@ -40,7 +42,7 @@ def get_label_and_preds(model, dataloader: "FastDataLoader"):
 
 def accuracy_score(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.Tensor:
     # return np.sum(y_true == y_pred) / len(y_true)
-    return torch.mean(y_true == y_pred) 
+    return np.mean(y_true == y_pred) 
 
 
 
@@ -86,7 +88,7 @@ def plot_confusion_matrix(y_true: torch.Tensor, y_pred: torch.Tensor) -> "matplo
 
 
 def plot_classification_report(y_test: torch.Tensor, 
-                               y_pred,: torch.Tensor, 
+                               y_pred: torch.Tensor, 
                                title='Classification Report', 
                                figsize=(8, 6), 
                                save_fig_path=None, **kwargs):
@@ -215,7 +217,8 @@ def plot_roc_curve(y_true: torch.Tensor, y_score: torch.Tensor, figsize=(5,5)):
     ax.grid(True, linestyle='-', linewidth=0.5, color='grey', alpha=0.5)
     ax.set_yticks(np.arange(0, 1.1, 0.2))
     plt.tight_layout()
-    plt.show()
+    return fig, roc_auc
+    
     
     
 def y_score_histogram(y_score: torch.Tensor):
@@ -228,3 +231,43 @@ def y_score_histogram(y_score: torch.Tensor):
     # ax.set_yticks(np.arange(0, 1.1, 0.2))
     plt.tight_layout()
     return fig
+
+
+
+
+class FinalMetricsCallback(pl.Callback):
+    def on_keyboard_interrupt(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        self.on_fit_end(trainer, pl_module)
+
+    def on_fit_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        STEP = 1
+        dataloader = trainer.train_dataloader
+        print("Careful, using train_dataloader for final metrics. Please use test_dataloader if you have one.")
+        
+        # get model outputs
+        y_true, y_logits, y_score, y_pred = get_label_and_preds(pl_module, dataloader)
+        # get accuracy
+        accuracy = accuracy_score(y_true, y_pred)
+        wandb.run.summary["accuracy"] = accuracy
+        # get fpr and tpr
+        # fpr, tpr, thresholds = roc_curve(y_true, y_score)
+        fig_roc, roc_auc = plot_roc_curve(y_true, y_score)
+        trainer.logger.experiment.log({"roc": wandb.Image(fig_roc)})
+        # get AUROC
+        wandb.run.summary["AUROC"] = np.round(roc_auc, 4)
+        # confusion matrix
+        fig_cm = plot_confusion_matrix(y_true, y_pred)
+        wandb.log({"confusion_matrix": wandb.Image(fig_cm)})
+        # classification report
+        fig, ax = plot_classification_report(y_true, y_pred, figsize=(7,3))
+        trainer.logger.experiment.log({"classification_report": wandb.Image(fig)})
+        # histogram of y_scores
+        fig = y_score_histogram(y_score)
+        trainer.logger.experiment.log({"y_score histogram": wandb.Image(fig)})
+        
+        # wandb.run.log_artifact()
+        print('Accuracy: ', accuracy)
+        # wandb.run.log_code()
+        # wandb.finish()
+        print("AUROC: ", roc_auc)
+        return

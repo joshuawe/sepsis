@@ -70,6 +70,7 @@ class FastDataLoader:
     processes at every epoch."""
     def __init__(self, dataset, batch_size, num_workers):
         super().__init__()
+        self.dataset = dataset
         
         self.sampler = StatefulSampler(dataset, shuffle = True)
         

@@ -270,4 +270,5 @@ class FinalMetricsCallback(pl.Callback):
         # wandb.run.log_code()
         # wandb.finish()
         print("AUROC: ", roc_auc)
+        plt.close('all')
         return

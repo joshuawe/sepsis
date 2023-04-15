@@ -28,6 +28,8 @@ class TCN_lightning(pl.LightningModule):
         print('MLP part input size: ', fc_input)
         self.fc = torch.nn.Sequential(*[torch.nn.Linear(fc_input, 1).double()])
         self.save_hyperparameters()
+        self.pad_value = -1
+        print('Value recognized as pad value:', self.pad_value)
         # Count the number of hyperparameters
         
     def forward(self, batch: torch.Tensor):
@@ -35,7 +37,7 @@ class TCN_lightning(pl.LightningModule):
         input = batch[:, :, :-1]
         target = batch[:, :, -1]
         
-        mask = ~target.isnan()
+        mask = ~(target == self.pad_value)
         mask = mask.to(torch.double)
         input = input.to(torch.double)
         output = self.model(input)
@@ -46,6 +48,12 @@ class TCN_lightning(pl.LightningModule):
         output, mask, target = self(batch)
         loss = self.loss(output, target, mask)
         self.log("train_loss", loss, on_epoch=True, on_step=False, prog_bar=True, logger=True)
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        output, mask, target = self(batch)
+        loss = self.loss(output, target, mask)
+        self.log("val_loss", loss, on_epoch=True, on_step=False, prog_bar=True, logger=True)
         return loss
     
     def configure_optimizers(self):

@@ -75,7 +75,8 @@ def get_data_loader_miiv(
             path: Optional[str]=None, 
             batch_size: int=100,
             splits: tuple= (0.8, 0.1, 0.1),
-            drop_time: bool=True
+            drop_time: bool=True,
+            pad_value=-1
             ) -> "tuple[FastDataLoader, int, torch.Tensor]":
     
     if path is None:
@@ -91,14 +92,19 @@ def get_data_loader_miiv(
 
     print('Batches shape:', batch_representation.shape)
     
-    splits = [0.6, 0.2, 0.2]
     num_samples = batch_representation.shape[0]
-    batch_size = 5000
     train_num = int(splits[0] * num_samples)
     val_num = int((splits[0] + splits[1]) * num_samples)
     dataloader_train = FastDataLoader(batch_representation[:train_num], batch_size, 1)
     dataloader_val = FastDataLoader(batch_representation[train_num:val_num], batch_size, 1)
     dataloader_test = FastDataLoader(batch_representation[val_num:], batch_size, 1)
+    
+    input_features = batch_representation.shape[-1] -1  # -1 for the label
+    
+    prop_cases = batch_representation[:, :, -1].mean(where=(batch_representation[:, :, -1] != pad_value))
+    pos_weight = torch.tensor((1 - prop_cases) / prop_cases)
+    
+    return dataloader_train, dataloader_val, dataloader_test, input_features, pos_weight
 
 
 

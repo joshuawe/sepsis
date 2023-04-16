@@ -3,6 +3,9 @@
 import pandas as pd
 import numpy as np
 import torch
+from pathlib import Path
+
+from typing import Optional, Tuple, Union
 
 from .fast_data_loader import FastDataLoader
 
@@ -68,12 +71,34 @@ def get_data_loader_synthetic(
 
 
 
-def get_dataloader_miiv(
-            path: str, 
-            batch_size: int, 
+def get_data_loader_miiv(
+            path: Optional[str]=None, 
+            batch_size: int=100,
+            splits: tuple= (0.8, 0.1, 0.1),
             drop_time: bool=True
             ) -> "tuple[FastDataLoader, int, torch.Tensor]":
-    raise NotImplementedError
+    
+    if path is None:
+        path = '/home2/joshua.wendland/Documents/sepsis/notebooks/miiv/miiv_fully_observed_TCN.npz'
+        
+    file_path = Path(path)
+    if file_path.is_file():
+        print('Loading data from file')
+        batch_representation = np.load(file_path, allow_pickle=True)['data']
+    else:
+        raise FileNotFoundError(f'File not found: {file_path}')
+    
+
+    print('Batches shape:', batch_representation.shape)
+    
+    splits = [0.6, 0.2, 0.2]
+    num_samples = batch_representation.shape[0]
+    batch_size = 5000
+    train_num = int(splits[0] * num_samples)
+    val_num = int((splits[0] + splits[1]) * num_samples)
+    dataloader_train = FastDataLoader(batch_representation[:train_num], batch_size, 1)
+    dataloader_val = FastDataLoader(batch_representation[train_num:val_num], batch_size, 1)
+    dataloader_test = FastDataLoader(batch_representation[val_num:], batch_size, 1)
 
 
 

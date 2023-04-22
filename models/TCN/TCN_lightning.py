@@ -63,7 +63,7 @@ class TCN_lightning(pl.LightningModule):
             # weight_decay=0.0001
         )
         # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.9) # Adjust step_size and gamma as needed
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.66, patience=20, threshold=0.0001, threshold_mode='rel', verbose=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.66, patience=10, threshold=0.0001, threshold_mode='rel', verbose=True)
         optimizer_dict = {
                 'optimizer': optimizer,
                 'lr_scheduler': {

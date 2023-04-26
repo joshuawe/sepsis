@@ -58,7 +58,7 @@ gp_params = {
     'num_tasks': 5,  # number of tasks == number of features
     'num_kernels': 10,
     'data_mode': 'no_simulation',   # 'no_simulation' or 'simulation', with simulation a ground truth is expected to passed as well, ground truth = values for data that is missing in train dataloader
-    'ckpt_path': 'best_model-v_recon_loss_target=1.42-epoch=62.ckpt',  # path to checkpoint of trained model, full path or relative to model directory    
+    # 'ckpt_path': 'best_model-v_recon_loss_target=1.10-epoch=142.ckpt',  # path to checkpoint of trained model, full path or relative to model directory    
 }
     
 # Config for mi_model from AFA module (MultipleImputationModel_ts class)

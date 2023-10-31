@@ -140,17 +140,18 @@ def preprocess_data_for_TCN(path_read: str, path_save: str, pad_value: int=-1, f
     dict:
         Dictionary with the keys 'mean' and 'std' if zscore_flag is True, and 'data'.
     """
-    miiv_path_p = '~/Documents/data/ts/miiv/fully_observed/miiv_ts_wide.parquet'
-    save_path = '/home2/joshua.wendland/Documents/sepsis/notebooks/miiv/miiv_fully_observed_TCN.npz'
+    # miiv_path_p = '~/Documents/data/ts/miiv/fully_observed/miiv_ts_wide.parquet'
+    # save_path = '/home2/joshua.wendland/Documents/sepsis/notebooks/miiv/miiv_fully_observed_TCN_zscore.npz'
     df = pd.read_parquet(path_read)
-    # fill missing values
-    df = df.groupby('id', group_keys=False).apply(lambda x: x.ffill().fillna(value=fill_na_value))
+    
     # rearrange label column and drop time
     cols = list(df.columns)
     cols.remove('label')
     cols.remove('time')
     cols += ['label']
     df = df[cols]
+    print('Rearranged label column and dropped time column.')
+    
     # zscore data
     if zscore_flag is True:
         # select only the numeric columns
@@ -160,14 +161,21 @@ def preprocess_data_for_TCN(path_read: str, path_save: str, pad_value: int=-1, f
         mean = df[numeric_cols].mean()
         std = df[numeric_cols].std(ddof=0)
         df[numeric_cols] = (df[numeric_cols] - mean) / std
+        print('Zscored data.')
         
+    # fill missing values
+    df = df.groupby('id', group_keys=False).apply(lambda x: x.ffill().fillna(value=fill_na_value))
+    print(f'Filled missing values (ffill, then fillna (value={fill_na_value})).')
+    
     # pad sequences
     batch_representation = pad_sequence(df, 170, pad_value=pad_value)
+    
+    # save data
     data_dict = {'data': batch_representation}
     if zscore_flag is True:
         data_dict['mean'] = mean
         data_dict['std'] = std
-    np.savez(save_path, **data_dict)
+    np.savez(path_save, **data_dict)
     print('batch_representation.shape:', batch_representation.shape)
     print('Saved numpy object.')
     return data_dict

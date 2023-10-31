@@ -71,6 +71,7 @@ class FastDataLoader:
     def __init__(self, dataset, batch_size, num_workers):
         super().__init__()
         self.dataset = dataset
+        self.batch_size = batch_size
         
         self.sampler = StatefulSampler(dataset, shuffle = True)
         

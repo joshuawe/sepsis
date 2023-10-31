@@ -11,7 +11,7 @@ from .TCN_lightning import TCN_lightning
 from .metrics import FinalMetricsCallback
 
 
-def TCN_fit_pipeline(
+def     TCN_fit_pipeline(
         train_dataloader, 
         val_dataloader, 
         input_features: int, 
@@ -30,7 +30,8 @@ def TCN_fit_pipeline(
             'kernel_size': 2,
             'dropout': 0.0,
             'lr': 0.01,
-            'max_epochs': 1000
+            'max_epochs': 1000,
+            'patience': 50
             }
         
     # add stats
@@ -51,7 +52,7 @@ def TCN_fit_pipeline(
     print(pl_model)
 
     # Callbacks
-    es_callback = EarlyStopping(monitor='train_loss', patience=60, mode='min', check_finite=True, min_delta=0.0001, verbose=False)
+    es_callback = EarlyStopping(monitor='val_loss', patience=config['patience'], mode='min', check_finite=True, min_delta=0.0001, verbose=True)
     lr_callback = LearningRateMonitor(logging_interval='epoch')
     metrics_callback = FinalMetricsCallback()
     callbacks = [es_callback, lr_callback, metrics_callback]

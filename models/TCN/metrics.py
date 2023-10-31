@@ -16,7 +16,7 @@ from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 
 
 @torch.no_grad()
-def get_label_and_preds(model, dataloader: "FastDataLoader"):
+def get_label_and_preds(model, dataloader: "FastDataLoader", pad_value=-1):
     model.eval()
     # get predictions and targets
     y_true = []
@@ -26,6 +26,9 @@ def get_label_and_preds(model, dataloader: "FastDataLoader"):
         input = batch[:, :, :-1]
         target = batch[:, :, -1]
         pred, _, _ = model(batch)
+        target, pred = target.ravel(), pred.ravel()  # shape from (batch, time_pts) to (batch*time_pts)
+        idx = (target != pad_value) # only keep time_pts, where there was no padding
+        target, pred = target[idx], pred[idx]
         y_true.append(target.detach().numpy())
         y_score.append(pred.detach().squeeze().numpy())
     y_true = np.concatenate(y_true).ravel()
@@ -241,11 +244,22 @@ class FinalMetricsCallback(pl.Callback):
 
     def on_fit_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         STEP = 1
-        dataloader = trainer.train_dataloader
-        print("Careful, using train_dataloader for final metrics. Please use test_dataloader if you have one.")
+        if (trainer.test_dataloaders is not None):
+            dataloader = trainer.test_dataloaders[0]
+            print("Using test_dataloader for final metrics.")
+        elif (trainer.val_dataloaders is not None):
+            dataloader = trainer.val_dataloaders[0]
+            print("Careful, using val_dataloader for final metrics. Please use test_dataloader if you have one.")
+        else:
+            dataloader = trainer.train_dataloader
+            print("Careful, using train_dataloader for final metrics. Please use test_dataloader if you have one.")
+            
+        # dataloader = trainer.train_dataloader
+        # dataloader = trainer.val_dataloaders[0]
         
         # get model outputs
         y_true, y_logits, y_score, y_pred = get_label_and_preds(pl_module, dataloader)
+        print(f"y_true: {y_true.shape}, y_logits: {y_logits.shape}, y_score: {y_score.shape}, y_pred: {y_pred.shape}")
         # get accuracy
         accuracy = accuracy_score(y_true, y_pred)
         wandb.run.summary["accuracy"] = accuracy

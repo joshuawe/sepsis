@@ -60,17 +60,17 @@ class TCN_lightning(pl.LightningModule):
         optimizer = torch.optim.Adam(
             self.parameters(),
             lr=self.config['lr'],
-            # weight_decay=0.0001
+            weight_decay = self.config.get('weight_decay', 0)  # 0.0001
         )
         # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.9) # Adjust step_size and gamma as needed
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.66, patience=10, threshold=0.0001, threshold_mode='rel', verbose=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.8, patience=60, threshold=0.0001, threshold_mode='rel', verbose=True)
         optimizer_dict = {
                 'optimizer': optimizer,
                 'lr_scheduler': {
                     'scheduler': scheduler,
                     'interval': 'epoch',
                     'frequency': 1,
-                    'monitor': 'train_loss',
+                    'monitor': 'val_loss',
                     'strict': True,
                 },
                 'monitor': 'train_loss'}
